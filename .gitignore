@@ -1,2 +1,2 @@
-compressContents/*
-!compressContents
+compressContents/assets/*
+!compressContents/assets

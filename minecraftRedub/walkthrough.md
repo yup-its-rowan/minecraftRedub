@@ -15,3 +15,11 @@ First, I need to write a program that does a few things. I need to be able to op
 
 And then I gotta do that 4 thousand times. Let's get to it.
 
+## Day 2
+
+This is a small update, just cleaned up the file structure and uploaded to git. I looked online to see if there is anything that does this already, like a program or a mod of some kind. But I can't seem to find anything. Cool!
+
+Also renamed this from "SoundSwitchinator" to "MinecraftRedub". Maybe someone else looking to do the same thing can use this in the future :p
+
+
+

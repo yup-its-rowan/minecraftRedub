@@ -21,5 +21,4 @@ This is a small update, just cleaned up the file structure and uploaded to git. 
 
 Also renamed this from "SoundSwitchinator" to "MinecraftRedub". Maybe someone else looking to do the same thing can use this in the future :p
 
-## Day 3
 

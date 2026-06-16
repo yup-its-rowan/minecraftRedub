@@ -119,9 +119,11 @@ class WaveformCanvas(ttk.Frame):
 		self._canvas.pack(fill="both", expand=True)
 		self._color = color
 		self._data = np.zeros(0, dtype=np.float32)
+		self._reference_peak = 0.0
 
-	def set_audio(self, audio: np.ndarray | None, sample_rate: int | None = None) -> None:
+	def set_audio(self, audio: np.ndarray | None, sample_rate: int | None = None, reference_peak: float | None = None) -> None:
 		self._data = np.asarray(audio if audio is not None else np.zeros(0, dtype=np.float32), dtype=np.float32)
+		self._reference_peak = max(0.0, float(reference_peak)) if reference_peak is not None else 0.0
 		self.redraw()
 
 	def redraw(self) -> None:
@@ -138,7 +140,9 @@ class WaveformCanvas(ttk.Frame):
 		sample_count = self._data.size
 		bins = min(sample_count, max(120, width))
 		points_per_bin = max(1, sample_count // bins)
-		amplitude = float(np.max(np.abs(self._data))) or 1.0
+		amplitude = self._reference_peak if self._reference_peak > 0 else float(np.max(np.abs(self._data)))
+		if amplitude <= 0:
+			amplitude = 1.0
 		center_y = height / 2
 		step_x = width / bins
 
@@ -173,6 +177,7 @@ class MinecraftRedubApp:
 		self.trimmed_audio = np.zeros(0, dtype=np.float32)
 		self.auto_lead_ms = 0.0
 		self.auto_tail_ms = 0.0
+		self._waveform_reference_peak = 1.0
 
 		self.record_delay_ms = int(DEFAULT_RECORD_DELAY_SECONDS * 1000)
 		self.recording = False
@@ -363,6 +368,10 @@ class MinecraftRedubApp:
 			self.status_var.set(f"Could not load source audio: {exc}")
 			return
 
+		self._waveform_reference_peak = float(np.max(np.abs(self.original_audio))) if self.original_audio.size else 1.0
+		if self._waveform_reference_peak <= 0:
+			self._waveform_reference_peak = 1.0
+
 		self.recorded_audio = np.zeros(0, dtype=np.float32)
 		self.trimmed_audio = np.zeros(0, dtype=np.float32)
 		self.auto_lead_ms = 0.0
@@ -370,8 +379,8 @@ class MinecraftRedubApp:
 		self.lead_trim_var.set(0.0)
 		self.tail_trim_var.set(0.0)
 		self._update_trim_value_labels()
-		self.original_canvas.set_audio(self.original_audio, self.original_rate)
-		self.recorded_canvas.set_audio(None)
+		self.original_canvas.set_audio(self.original_audio, self.original_rate, reference_peak=self._waveform_reference_peak)
+		self.recorded_canvas.set_audio(None, reference_peak=self._waveform_reference_peak)
 		self._refresh_durations()
 		self._set_progress()
 		self.item_var.set(f"Current file: {item.relative_path.as_posix()}")
@@ -515,7 +524,7 @@ class MinecraftRedubApp:
 		self.tail_trim_var.set(min(MAX_TRIM_PADDING_MS, self.auto_tail_ms))
 		self._update_trim_value_labels()
 		self._refresh_trimmed_preview()
-		self.recorded_canvas.set_audio(self.trimmed_audio)
+		self.recorded_canvas.set_audio(self.trimmed_audio, self.recorded_rate, reference_peak=self._waveform_reference_peak)
 		self._refresh_durations()
 		self.status_var.set("Recording captured. Review the waveform, adjust trim, or retry the recording.")
 
@@ -532,9 +541,9 @@ class MinecraftRedubApp:
 		self._update_trim_value_labels()
 		self._refresh_trimmed_preview()
 		if self.trimmed_audio.size:
-			self.recorded_canvas.set_audio(self.trimmed_audio, self.recorded_rate)
+			self.recorded_canvas.set_audio(self.trimmed_audio, self.recorded_rate, reference_peak=self._waveform_reference_peak)
 		else:
-			self.recorded_canvas.set_audio(self.recorded_audio if self.recorded_audio.size else None, self.recorded_rate)
+			self.recorded_canvas.set_audio(self.recorded_audio if self.recorded_audio.size else None, self.recorded_rate, reference_peak=self._waveform_reference_peak)
 		self._refresh_durations()
 		if self.recorded_audio.size:
 			self.status_var.set("Trim updated. Preview again or save the file.")
@@ -545,7 +554,7 @@ class MinecraftRedubApp:
 		self.recorded_audio = np.zeros(0, dtype=np.float32)
 		self.trimmed_audio = np.zeros(0, dtype=np.float32)
 		self.recorded_rate = self.original_rate
-		self.recorded_canvas.set_audio(None)
+		self.recorded_canvas.set_audio(None, reference_peak=self._waveform_reference_peak)
 		self.lead_trim_var.set(0.0)
 		self.tail_trim_var.set(0.0)
 		self._update_trim_value_labels()
@@ -577,7 +586,7 @@ class MinecraftRedubApp:
 		self.current_index += 1
 		self.recorded_audio = np.zeros(0, dtype=np.float32)
 		self.trimmed_audio = np.zeros(0, dtype=np.float32)
-		self.recorded_canvas.set_audio(None)
+		self.recorded_canvas.set_audio(None, reference_peak=self._waveform_reference_peak)
 		self._refresh_durations()
 		self._set_progress()
 		self._load_next_item()

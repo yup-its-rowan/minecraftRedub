@@ -21,4 +21,8 @@ This is a small update, just cleaned up the file structure and uploaded to git. 
 
 Also renamed this from "SoundSwitchinator" to "MinecraftRedub". Maybe someone else looking to do the same thing can use this in the future :p
 
+## Day 3
 
+I've found some videos where people have replaced some sounds with their voice, but not on this scale. On a smaller scale, automating it has no point, so there is still some utility for this project.
+
+First, I've found that it is helpful to keep an "objects" folder at the root that is just a copy/paste of all the sounds that we are going to be replacing. I will replace this with a dynamic download later probably, but it seems best not to attatch a billion random files to the main project that need to be replaced on updates anyway.

@@ -333,7 +333,8 @@ class MinecraftRedubApp:
 	def _load_next_item(self) -> None:
 		while self.current_index < len(self.items):
 			item = self.items[self.current_index]
-			if not item.target_path.exists():
+			target_path = item.target_path(self.assets_root)
+			if not target_path.exists():
 				self.current_item = item
 				self._load_current_item()
 				return

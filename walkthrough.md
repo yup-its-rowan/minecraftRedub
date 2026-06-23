@@ -34,3 +34,7 @@ There are a couple things that we need to do before we start our first recording
 I was given a nice start, but theres a lot to do from here.
 
 ## Day 4
+
+A lot of the changes that I wanted to make have been made. Now the program is more or less functional. There are still some pain points relating to the UI, as well as some trouble im having with the previous/next buttons (i want to view my previous try at recreation when i go back so i can see in the moment if the recording should be re-recorded). Regardless, we hit strong progress and i got a couple recordings in. The most technical part of this was creating another set of audio sliders to pad the recorded audio, and hooking up both sets of sliders to themselves so that we couldn't overlap the start and end locations for the crops. Also adding more bars in the canvas. 
+
+The only sad part is that the recordings created so far are of cave audio (since its the first), which is to my knowledge just random orchestral hits. Which sound bad and weird to recreate with only your mouth. Only 4400 to go!

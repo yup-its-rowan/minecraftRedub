@@ -22,6 +22,7 @@ DEFAULT_OBJECTS_ROOT = Path("objects")
 DEFAULT_RECORD_DELAY_SECONDS = 0.75
 DEFAULT_SAMPLE_RATE = 44100
 MAX_TRIM_PADDING_MS = 1500
+MAX_ALIGN_PADDING_MS = 5000
 
 
 @dataclass(frozen=True)
@@ -103,11 +104,31 @@ def apply_manual_trim(audio: np.ndarray, sample_rate: int, lead_ms: float, tail_
 	if audio.size == 0:
 		return audio
 
-	lead_samples = max(0, int(sample_rate * lead_ms / 1000.0))
-	tail_samples = max(0, int(sample_rate * tail_ms / 1000.0))
-	start = min(audio.size, lead_samples)
-	end = max(start, audio.size - tail_samples)
-	return audio[start:end]
+	lead_samples = int(sample_rate * lead_ms / 1000.0)
+	tail_samples = int(sample_rate * tail_ms / 1000.0)
+
+	start_index = 0
+	end_index = audio.size
+	pre_pad = 0
+	post_pad = 0
+
+	if lead_samples >= 0:
+		start_index = min(audio.size, lead_samples)
+	else:
+		pre_pad = min(abs(lead_samples), int(MAX_TRIM_PADDING_MS * sample_rate / 1000))
+
+	if tail_samples >= 0:
+		end_index = max(start_index, audio.size - tail_samples)
+	else:
+		post_pad = min(abs(tail_samples), int(MAX_TRIM_PADDING_MS * sample_rate / 1000))
+
+	result = audio[start_index:end_index]
+	if pre_pad > 0:
+		result = np.concatenate((np.zeros(pre_pad, dtype=np.float32), result))
+	if post_pad > 0:
+		result = np.concatenate((result, np.zeros(post_pad, dtype=np.float32)))
+
+	return result
 
 
 class WaveformCanvas(ttk.Frame):
@@ -120,10 +141,15 @@ class WaveformCanvas(ttk.Frame):
 		self._color = color
 		self._data = np.zeros(0, dtype=np.float32)
 		self._reference_peak = 0.0
+		self._marker_positions: list[float] = []
 
 	def set_audio(self, audio: np.ndarray | None, sample_rate: int | None = None, reference_peak: float | None = None) -> None:
 		self._data = np.asarray(audio if audio is not None else np.zeros(0, dtype=np.float32), dtype=np.float32)
 		self._reference_peak = max(0.0, float(reference_peak)) if reference_peak is not None else 0.0
+		self.redraw()
+
+	def set_markers(self, marker_positions: list[float] | None) -> None:
+		self._marker_positions = [] if marker_positions is None else [min(1.0, max(0.0, float(p))) for p in marker_positions]
 		self.redraw()
 
 	def redraw(self) -> None:
@@ -158,6 +184,10 @@ class WaveformCanvas(ttk.Frame):
 			x = bin_index * step_x
 			self._canvas.create_line(x, center_y - bar_height, x, center_y + bar_height, fill=self._color)
 
+		for marker in self._marker_positions:
+			x = marker * width
+			self._canvas.create_line(x, 0, x, height, fill="#ef4444", width=2)
+
 
 class MinecraftRedubApp:
 	def __init__(self, root: tk.Tk, index_path: Path, assets_root: Path, objects_root: Path) -> None:
@@ -175,9 +205,11 @@ class MinecraftRedubApp:
 		self.recorded_audio = np.zeros(0, dtype=np.float32)
 		self.recorded_rate = DEFAULT_SAMPLE_RATE
 		self.trimmed_audio = np.zeros(0, dtype=np.float32)
+		self.aligned_audio = np.zeros(0, dtype=np.float32)
 		self.auto_lead_ms = 0.0
 		self.auto_tail_ms = 0.0
 		self._waveform_reference_peak = 1.0
+		self.trim_too_long = False
 
 		self.record_delay_ms = int(DEFAULT_RECORD_DELAY_SECONDS * 1000)
 		self.recording = False
@@ -187,18 +219,25 @@ class MinecraftRedubApp:
 		self._recorded_chunks: list[np.ndarray] = []
 		self._recording_lock = threading.Lock()
 		self._playback_lock = threading.Lock()
+		self._adjusting_silence = False
+		self._adjusting_trim = False
 		self._status_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
 
 		self.lead_trim_var = tk.DoubleVar(value=0.0)
 		self.tail_trim_var = tk.DoubleVar(value=0.0)
+		self.pre_silence_var = tk.DoubleVar(value=0.0)
+		self.post_silence_var = tk.DoubleVar(value=0.0)
 		self.status_var = tk.StringVar(value="Loading assets...")
+		self.warning_var = tk.StringVar(value="")
 		self.progress_var = tk.StringVar(value="")
 		self.item_var = tk.StringVar(value="")
 		self.original_duration_var = tk.StringVar(value="Original: --")
 		self.recorded_duration_var = tk.StringVar(value="Recorded: --")
 		self.trimmed_duration_var = tk.StringVar(value="Trimmed: --")
+		self.aligned_duration_var = tk.StringVar(value="Final: --")
 
 		self._build_ui()
+		self._update_trim_slider_limits()
 		self.root.after(100, self._drain_status_queue)
 		self.root.after(120, self._refresh_canvases)
 		self.root.after(150, self._load_next_item)
@@ -216,6 +255,7 @@ class MinecraftRedubApp:
 		style.configure("TLabel", background="#0f172a", foreground="#e5e7eb", font=("Segoe UI", 10))
 		style.configure("Muted.TLabel", background="#0f172a", foreground="#94a3b8", font=("Segoe UI", 9))
 		style.configure("Card.TLabel", background="#111827", foreground="#e5e7eb", font=("Segoe UI", 10))
+		style.configure("Warning.TLabel", background="#111827", foreground="#f87171", font=("Segoe UI", 9, "bold"))
 		style.configure("Title.TLabel", background="#0f172a", foreground="#f8fafc", font=("Segoe UI Semibold", 18))
 		style.configure("TButton", padding=(12, 8), font=("Segoe UI", 10))
 		style.configure("Accent.TButton", padding=(12, 8), font=("Segoe UI", 10, "bold"), foreground="#0f172a")
@@ -234,6 +274,8 @@ class MinecraftRedubApp:
 		ttk.Label(status_bar, textvariable=self.item_var, style="Card.TLabel").pack(anchor="w")
 		ttk.Label(status_bar, textvariable=self.progress_var, style="Card.TLabel").pack(anchor="w", pady=(2, 0))
 		ttk.Label(status_bar, textvariable=self.status_var, style="Card.TLabel").pack(anchor="w", pady=(2, 0))
+		self.warning_label = ttk.Label(status_bar, textvariable=self.warning_var, style="Warning.TLabel")
+		self.warning_label.pack(anchor="w", pady=(2, 0))
 
 		controls = ttk.Frame(outer)
 		controls.pack(fill="x", pady=(0, 12))
@@ -251,15 +293,20 @@ class MinecraftRedubApp:
 		ttk.Label(right_controls, text="Recording Workflow", style="Card.TLabel", font=("Segoe UI", 11, "bold")).pack(anchor="w")
 		ttk.Label(right_controls, textvariable=self.recorded_duration_var, style="Card.TLabel").pack(anchor="w", pady=(2, 0))
 		ttk.Label(right_controls, textvariable=self.trimmed_duration_var, style="Card.TLabel").pack(anchor="w", pady=(2, 0))
+		ttk.Label(right_controls, textvariable=self.aligned_duration_var, style="Card.TLabel").pack(anchor="w", pady=(2, 0))
 
 		buttons = ttk.Frame(right_controls, style="Card.TFrame")
 		buttons.pack(anchor="w", pady=(10, 0), fill="x")
 		self.record_button = ttk.Button(buttons, text="Start Recording", command=self.toggle_recording, style="Accent.TButton")
 		self.record_button.pack(side="left")
+		ttk.Button(buttons, text="Previous", command=self.load_previous_item).pack(side="left", padx=(8, 0))
 		ttk.Button(buttons, text="Play Recorded", command=self.play_recorded).pack(side="left", padx=(8, 0))
-		ttk.Button(buttons, text="Retry Recording", command=self.retry_recording).pack(side="left", padx=(8, 0))
 		ttk.Button(buttons, text="Apply Trim", command=self.apply_trim_from_sliders).pack(side="left", padx=(8, 0))
-		ttk.Button(buttons, text="Save & Next", command=self.save_and_next, style="Accent.TButton").pack(side="right")
+		self.save_button = ttk.Button(buttons, text="Save & Next", command=self.save_and_next, style="Accent.TButton")
+		self.save_button.pack(side="right")
+		ttk.Button(buttons, text="Next Without Saving", command=self.next_without_saving).pack(side="right", padx=(8, 0))
+		ttk.Button(buttons, text="Export Zip", command=self.export_zip).pack(side="right", padx=(8,8))
+		ttk.Button(buttons, text="Check Completion", command=self.check_completion).pack(side="right", padx=(8,0))
 
 		trim_panel = ttk.Frame(outer, style="Card.TFrame", padding=12)
 		trim_panel.pack(fill="x", pady=(0, 12))
@@ -268,18 +315,37 @@ class MinecraftRedubApp:
 		lead_row = ttk.Frame(trim_panel, style="Card.TFrame")
 		lead_row.pack(fill="x", pady=(8, 4))
 		ttk.Label(lead_row, text="Lead Trim (ms)", style="Card.TLabel").pack(side="left")
-		lead_scale = ttk.Scale(lead_row, from_=0, to=MAX_TRIM_PADDING_MS, variable=self.lead_trim_var, command=lambda _value: self.apply_trim_from_sliders())
-		lead_scale.pack(side="left", fill="x", expand=True, padx=(12, 8))
+		self.lead_scale = ttk.Scale(lead_row, from_=0, to=MAX_TRIM_PADDING_MS, variable=self.lead_trim_var, command=self._on_lead_trim_changed)
+		self.lead_scale.pack(side="left", fill="x", expand=True, padx=(12, 8))
 		self.lead_value_label = ttk.Label(lead_row, text="0", style="Card.TLabel")
 		self.lead_value_label.pack(side="left")
 
 		tail_row = ttk.Frame(trim_panel, style="Card.TFrame")
 		tail_row.pack(fill="x", pady=(4, 0))
 		ttk.Label(tail_row, text="Tail Trim (ms)", style="Card.TLabel").pack(side="left")
-		tail_scale = ttk.Scale(tail_row, from_=0, to=MAX_TRIM_PADDING_MS, variable=self.tail_trim_var, command=lambda _value: self.apply_trim_from_sliders())
-		tail_scale.pack(side="left", fill="x", expand=True, padx=(12, 8))
+		self.tail_scale = ttk.Scale(tail_row, from_=0, to=MAX_TRIM_PADDING_MS, variable=self.tail_trim_var, command=self._on_tail_trim_changed)
+		self.tail_scale.pack(side="left", fill="x", expand=True, padx=(12, 8))
 		self.tail_value_label = ttk.Label(tail_row, text="0", style="Card.TLabel")
 		self.tail_value_label.pack(side="left")
+
+		align_label = ttk.Label(trim_panel, text="Silence Placement (ms)", style="Card.TLabel", font=("Segoe UI", 10, "bold"))
+		align_label.pack(anchor="w", pady=(10, 0))
+
+		pre_row = ttk.Frame(trim_panel, style="Card.TFrame")
+		pre_row.pack(fill="x", pady=(8, 4))
+		ttk.Label(pre_row, text="Pre-Silence (ms)", style="Card.TLabel").pack(side="left")
+		self.pre_scale = ttk.Scale(pre_row, from_=0, to=MAX_ALIGN_PADDING_MS, variable=self.pre_silence_var, command=self._on_pre_silence_changed)
+		self.pre_scale.pack(side="left", fill="x", expand=True, padx=(12, 8))
+		self.pre_value_label = ttk.Label(pre_row, text="0", style="Card.TLabel")
+		self.pre_value_label.pack(side="left")
+
+		post_row = ttk.Frame(trim_panel, style="Card.TFrame")
+		post_row.pack(fill="x", pady=(4, 0))
+		ttk.Label(post_row, text="Post-Silence (ms)", style="Card.TLabel").pack(side="left")
+		self.post_scale = ttk.Scale(post_row, from_=0, to=MAX_ALIGN_PADDING_MS, variable=self.post_silence_var, command=self._on_post_silence_changed)
+		self.post_scale.pack(side="left", fill="x", expand=True, padx=(12, 8))
+		self.post_value_label = ttk.Label(post_row, text="0", style="Card.TLabel")
+		self.post_value_label.pack(side="left")
 
 		waveforms = ttk.Frame(outer)
 		waveforms.pack(fill="both", expand=True)
@@ -335,21 +401,44 @@ class MinecraftRedubApp:
 		remaining = max(0, total - self.current_index)
 		self.progress_var.set(f"Progress: {self.current_index}/{total} complete, {remaining} remaining")
 
-	def _load_next_item(self) -> None:
-		while self.current_index < len(self.items):
-			item = self.items[self.current_index]
-			target_path = item.target_path(self.assets_root)
-			if not target_path.exists():
-				self.current_item = item
-				self._load_current_item()
-				return
-			self.current_index += 1
+	def _find_first_unrecorded_in_range(self, start: int, end: int) -> int | None:
+		#this that binary shiz
+		lo = start
+		hi = max(start, end)
+		if lo >= hi:
+			return None
 
-		self.current_item = None
-		self.item_var.set("All audio files in the index have already been created in compressContents/assets.")
-		self.status_var.set("Nothing left to record.")
-		self._set_progress()
-		self.record_button.configure(state="disabled")
+		def any_missing(up_to: int) -> bool:
+			for i in range(start, up_to + 1):
+				if not self.items[i].target_path(self.assets_root).exists():
+					return True
+			return False
+
+		if not any_missing(end - 1):
+			return None
+
+		while lo < hi:
+			mid = (lo + hi) // 2
+			if any_missing(mid):
+				hi = mid
+			else:
+				lo = mid + 1
+
+		return lo if lo < end and not self.items[lo].target_path(self.assets_root).exists() else None
+
+	def _load_next_item(self) -> None:
+		idx = self._find_first_unrecorded_in_range(self.current_index, len(self.items))
+		if idx is None:
+			self.current_item = None
+			self.item_var.set("All audio files in the index have already been created in compressContents/assets.")
+			self.status_var.set("Nothing left to record.")
+			self._set_progress()
+			self.record_button.configure(state="disabled")
+			return
+
+		self.current_index = idx
+		self.current_item = self.items[self.current_index]
+		self._load_current_item()
 
 	def _load_current_item(self) -> None:
 		item = self.current_item
@@ -364,7 +453,7 @@ class MinecraftRedubApp:
 
 		try:
 			self.original_audio, self.original_rate = read_audio(source_path)
-		except Exception as exc:  # pragma: no cover - defensive UI path
+		except Exception as exc:
 			self.status_var.set(f"Could not load source audio: {exc}")
 			return
 
@@ -372,15 +461,31 @@ class MinecraftRedubApp:
 		if self._waveform_reference_peak <= 0:
 			self._waveform_reference_peak = 1.0
 
-		self.recorded_audio = np.zeros(0, dtype=np.float32)
+		target_path = item.target_path(self.assets_root)
+		if target_path.exists():
+			try:
+				loaded, rate = read_audio(target_path)
+			except Exception:
+				loaded = np.zeros(0, dtype=np.float32)
+				rate = self.original_rate
+			self.recorded_audio = loaded.copy()
+			self.recorded_rate = rate
+			self.status_var.set(f"Loaded existing take for {item.relative_path.as_posix()}")
+		else:
+			self.recorded_audio = np.zeros(0, dtype=np.float32)
 		self.trimmed_audio = np.zeros(0, dtype=np.float32)
+		self.aligned_audio = np.zeros(0, dtype=np.float32)
 		self.auto_lead_ms = 0.0
 		self.auto_tail_ms = 0.0
 		self.lead_trim_var.set(0.0)
 		self.tail_trim_var.set(0.0)
+		self.pre_silence_var.set(0.0)
+		self.post_silence_var.set(0.0)
 		self._update_trim_value_labels()
 		self.original_canvas.set_audio(self.original_audio, self.original_rate, reference_peak=self._waveform_reference_peak)
-		self.recorded_canvas.set_audio(None, reference_peak=self._waveform_reference_peak)
+		self._refresh_trimmed_preview()
+		self._update_trim_markers()
+		self._render_recorded_preview()
 		self._refresh_durations()
 		self._set_progress()
 		self.item_var.set(f"Current file: {item.relative_path.as_posix()}")
@@ -397,10 +502,148 @@ class MinecraftRedubApp:
 			self.trimmed_duration_var.set(f"Trimmed: {self.trimmed_audio.size / self.recorded_rate:.2f}s")
 		else:
 			self.trimmed_duration_var.set("Trimmed: --")
+		if self.trim_too_long:
+			self.aligned_duration_var.set("Final: exceeds target")
+		elif self.aligned_audio.size:
+			self.aligned_duration_var.set(f"Final: {self.aligned_audio.size / self.recorded_rate:.2f}s")
+		elif self.original_audio.size:
+			self.aligned_duration_var.set(f"Final: {self.original_audio.size / self.original_rate:.2f}s (target)")
+		else:
+			self.aligned_duration_var.set("Final: --")
 
 	def _update_trim_value_labels(self) -> None:
 		self.lead_value_label.configure(text=f"{self.lead_trim_var.get():.0f}")
 		self.tail_value_label.configure(text=f"{self.tail_trim_var.get():.0f}")
+		self.pre_value_label.configure(text=f"{self.pre_silence_var.get():.0f}")
+		self.post_value_label.configure(text=f"{self.post_silence_var.get():.0f}")
+
+	def _update_trim_slider_limits(self) -> None:
+		if not hasattr(self, "lead_scale") or not hasattr(self, "tail_scale"):
+			return
+
+		if self.recorded_audio.size == 0:
+			self.lead_scale.configure(to=MAX_TRIM_PADDING_MS)
+			self.tail_scale.configure(to=MAX_TRIM_PADDING_MS)
+			return
+
+		duration_ms = (self.recorded_audio.size / float(max(1, self.recorded_rate))) * 1000.0
+		current_lead = float(self.lead_trim_var.get())
+		current_tail = float(self.tail_trim_var.get())
+		lead_max = max(0.0, duration_ms - current_tail)
+		tail_max = max(0.0, duration_ms - current_lead)
+		self.lead_scale.configure(to=lead_max)
+		self.tail_scale.configure(to=tail_max)
+		self._adjusting_trim = True
+		try:
+			if current_lead > lead_max:
+				self.lead_trim_var.set(lead_max)
+			if current_tail > tail_max:
+				self.tail_trim_var.set(tail_max)
+		finally:
+			self._adjusting_trim = False
+
+	def _on_lead_trim_changed(self, _value: str | None = None) -> None:
+		if self._adjusting_trim:
+			return
+		self._constrain_trim_pair(changed="lead")
+		self.apply_trim_from_sliders()
+
+	def _on_tail_trim_changed(self, _value: str | None = None) -> None:
+		if self._adjusting_trim:
+			return
+		self._constrain_trim_pair(changed="tail")
+		self.apply_trim_from_sliders()
+
+	def _constrain_trim_pair(self, changed: str | None = None) -> None:
+		if self.recorded_audio.size == 0:
+			return
+
+		duration_ms = (self.recorded_audio.size / float(max(1, self.recorded_rate))) * 1000.0
+		lead = max(0.0, float(self.lead_trim_var.get()))
+		tail = max(0.0, float(self.tail_trim_var.get()))
+
+		if lead + tail <= duration_ms:
+			self._update_trim_slider_limits()
+			return
+
+		if changed == "lead":
+			lead = min(lead, duration_ms)
+			tail = max(0.0, duration_ms - lead)
+		elif changed == "tail":
+			tail = min(tail, duration_ms)
+			lead = max(0.0, duration_ms - tail)
+		else:
+			lead = min(lead, duration_ms)
+			tail = max(0.0, duration_ms - lead)
+
+		self._adjusting_trim = True
+		try:
+			self.lead_trim_var.set(lead)
+			self.tail_trim_var.set(tail)
+		finally:
+			self._adjusting_trim = False
+
+		self._update_trim_slider_limits()
+
+	def _update_validation_state(self) -> None:
+		target_len = self._target_output_length()
+		trimmed_len = int(self.trimmed_audio.size)
+		self.trim_too_long = bool(target_len > 0 and trimmed_len > target_len)
+		if self.trim_too_long:
+			target_seconds = target_len / float(max(1, self.recorded_rate))
+			trimmed_seconds = trimmed_len / float(max(1, self.recorded_rate))
+			self.warning_var.set(
+				f"Trimmed clip is {trimmed_seconds:.2f}s, longer than the target {target_seconds:.2f}s. Reduce the crop before saving."
+			)
+		else:
+			self.warning_var.set("")
+
+		save_enabled = self.current_item is not None and self.recorded_audio.size > 0 and not self.trim_too_long
+		self.save_button.configure(state="normal" if save_enabled else "disabled")
+
+	def _target_output_length(self) -> int:
+		if self.original_audio.size == 0:
+			return 0
+		target_seconds = float(self.original_audio.size) / float(max(1, self.original_rate))
+		return int(round(target_seconds * float(max(1, self.recorded_rate))))
+
+	def _on_pre_silence_changed(self, _value: str | None = None) -> None:
+		if self._adjusting_silence:
+			return
+		self.apply_trim_from_sliders(changed="pre")
+
+	def _on_post_silence_changed(self, _value: str | None = None) -> None:
+		if self._adjusting_silence:
+			return
+		self.apply_trim_from_sliders(changed="post")
+
+	def _enforce_silence_distribution(self, changed: str | None = None) -> None:
+		target_len = self._target_output_length()
+		trimmed_len = int(self.trimmed_audio.size)
+		gap = max(0, target_len - max(0, trimmed_len))
+
+		pre = max(0, int(self.recorded_rate * float(self.pre_silence_var.get()) / 1000.0))
+		post = max(0, int(self.recorded_rate * float(self.post_silence_var.get()) / 1000.0))
+
+		if gap <= 0:
+			pre = 0
+			post = 0
+		elif changed == "pre":
+			pre = min(pre, gap)
+			post = gap - pre
+		elif changed == "post":
+			post = min(post, gap)
+			pre = gap - post
+		else:
+			pre = min(pre, gap)
+			post = gap - pre
+
+		self._adjusting_silence = True
+		try:
+			self.pre_silence_var.set((pre / float(max(1, self.recorded_rate))) * 1000.0)
+			self.post_silence_var.set((post / float(max(1, self.recorded_rate))) * 1000.0)
+		finally:
+			self._adjusting_silence = False
 
 	def _refresh_canvases(self) -> None:
 		self.original_canvas.redraw()
@@ -412,7 +655,7 @@ class MinecraftRedubApp:
 		self._play_audio(self.original_audio, self.original_rate)
 
 	def play_recorded(self) -> None:
-		audio = self.trimmed_audio if self.trimmed_audio.size else self.recorded_audio
+		audio = self.aligned_audio if self.aligned_audio.size else (self.trimmed_audio if self.trimmed_audio.size else self.recorded_audio)
 		rate = self.recorded_rate if audio.size else DEFAULT_SAMPLE_RATE
 		if audio.size == 0:
 			return
@@ -452,7 +695,7 @@ class MinecraftRedubApp:
 			try:
 				time.sleep(self.record_delay_ms / 1000.0)
 				self._begin_input_stream()
-			except Exception as exc:  # pragma: no cover - defensive UI path
+			except Exception as exc:
 				self._enqueue_status("status", f"Recording failed to start: {exc}")
 				self._recording_thread = None
 				self.root.after(0, lambda: self.record_button.configure(text="Start Recording"))
@@ -468,7 +711,7 @@ class MinecraftRedubApp:
 			self._recorded_chunks = []
 			self.recording = True
 
-			def callback(indata, _frames, _time_info, status) -> None:  # pragma: no cover - hardware callback
+			def callback(indata, _frames, _time_info, status) -> None:
 				if status:
 					self._enqueue_status("status", f"Recording warning: {status}")
 				self._recorded_chunks.append(indata.copy())
@@ -523,43 +766,163 @@ class MinecraftRedubApp:
 		self.lead_trim_var.set(min(MAX_TRIM_PADDING_MS, self.auto_lead_ms))
 		self.tail_trim_var.set(min(MAX_TRIM_PADDING_MS, self.auto_tail_ms))
 		self._update_trim_value_labels()
-		self._refresh_trimmed_preview()
-		self.recorded_canvas.set_audio(self.trimmed_audio, self.recorded_rate, reference_peak=self._waveform_reference_peak)
-		self._refresh_durations()
+		self.apply_trim_from_sliders()
 		self.status_var.set("Recording captured. Review the waveform, adjust trim, or retry the recording.")
 
 	def _refresh_trimmed_preview(self) -> None:
 		if self.recorded_audio.size == 0:
 			self.trimmed_audio = np.zeros(0, dtype=np.float32)
+			self.aligned_audio = np.zeros(0, dtype=np.float32)
+			self._update_validation_state()
 			return
 
 		lead_ms = float(self.lead_trim_var.get())
 		tail_ms = float(self.tail_trim_var.get())
 		self.trimmed_audio = apply_manual_trim(self.recorded_audio, self.recorded_rate, lead_ms, tail_ms)
+		self._update_validation_state()
+		if self.trim_too_long:
+			self.aligned_audio = np.zeros(0, dtype=np.float32)
+		else:
+			self.aligned_audio = self._build_aligned_audio(self.trimmed_audio)
 
-	def apply_trim_from_sliders(self) -> None:
+	def _build_aligned_audio(self, cropped_audio: np.ndarray) -> np.ndarray:
+		if self.original_audio.size == 0:
+			return np.asarray(cropped_audio, dtype=np.float32)
+
+		target_len = self._target_output_length()
+		if target_len <= 0:
+			return np.asarray(cropped_audio, dtype=np.float32)
+
+		cropped = np.asarray(cropped_audio, dtype=np.float32)
+		if cropped.size >= target_len:
+			return cropped[:target_len]
+
+		pre_samples = max(0, int(self.recorded_rate * float(self.pre_silence_var.get()) / 1000.0))
+		post_samples = max(0, int(self.recorded_rate * float(self.post_silence_var.get()) / 1000.0))
+		max_gap = max(0, target_len - int(cropped.size))
+		if pre_samples + post_samples != max_gap:
+			pre_samples = min(pre_samples, max_gap)
+			post_samples = max_gap - pre_samples
+
+		out = np.zeros(target_len, dtype=np.float32)
+		start = pre_samples
+		stop_limit = target_len - post_samples
+		copy_len = min(int(cropped.size), max(0, stop_limit - start))
+		if copy_len > 0:
+			out[start:start + copy_len] = cropped[:copy_len]
+		return out
+
+	def _render_recorded_preview(self) -> None:
+		if self.trim_too_long:
+			preview_audio = self.trimmed_audio if self.trimmed_audio.size else self.recorded_audio
+			self.recorded_canvas.set_audio(preview_audio if preview_audio.size else None, self.recorded_rate, reference_peak=self._waveform_reference_peak)
+			self.recorded_canvas.set_markers(None)
+			return
+
+		if self.aligned_audio.size:
+			preview_audio = self.aligned_audio
+		else:
+			preview_audio = self.trimmed_audio if self.trimmed_audio.size else self.recorded_audio
+
+		self.recorded_canvas.set_audio(preview_audio if preview_audio.size else None, self.recorded_rate, reference_peak=self._waveform_reference_peak)
+		self.recorded_canvas.set_markers(self._aligned_clip_markers() if self.aligned_audio.size else None)
+
+	def _aligned_clip_markers(self) -> list[float] | None:
+		if self.trimmed_audio.size == 0:
+			return None
+		target_len = self._target_output_length()
+		if target_len <= 0:
+			return None
+		pre_samples = max(0, int(self.recorded_rate * float(self.pre_silence_var.get()) / 1000.0))
+		start = min(target_len, pre_samples) / target_len
+		end = min(target_len, pre_samples + int(self.trimmed_audio.size)) / target_len
+		return [start, end]
+
+	def _update_trim_markers(self) -> None:
+		if self.recorded_audio.size == 0:
+			self.recorded_canvas.set_markers(None)
+			return
+
+		record_len = int(self.recorded_audio.size)
+		lead_samples = max(0, int(self.recorded_rate * float(self.lead_trim_var.get()) / 1000.0))
+		tail_samples = max(0, int(self.recorded_rate * float(self.tail_trim_var.get()) / 1000.0))
+		left = min(record_len, lead_samples) / record_len
+		right = max(0, record_len - tail_samples) / record_len
+		self.recorded_canvas.set_markers([left, right])
+
+	def apply_trim_from_sliders(self, changed: str | None = None) -> None:
+		self._update_trim_slider_limits()
+		self._enforce_silence_distribution(changed=changed)
 		self._update_trim_value_labels()
 		self._refresh_trimmed_preview()
-		if self.trimmed_audio.size:
-			self.recorded_canvas.set_audio(self.trimmed_audio, self.recorded_rate, reference_peak=self._waveform_reference_peak)
-		else:
-			self.recorded_canvas.set_audio(self.recorded_audio if self.recorded_audio.size else None, self.recorded_rate, reference_peak=self._waveform_reference_peak)
+		self._update_trim_value_labels()
+		self._update_trim_markers()
+		self._render_recorded_preview()
 		self._refresh_durations()
 		if self.recorded_audio.size:
-			self.status_var.set("Trim updated. Preview again or save the file.")
+			self.status_var.set("Trim/placement updated. Preview again or save the file.")
 
 	def retry_recording(self) -> None:
 		if self.recording:
 			self.stop_recording()
 		self.recorded_audio = np.zeros(0, dtype=np.float32)
 		self.trimmed_audio = np.zeros(0, dtype=np.float32)
+		self.aligned_audio = np.zeros(0, dtype=np.float32)
 		self.recorded_rate = self.original_rate
 		self.recorded_canvas.set_audio(None, reference_peak=self._waveform_reference_peak)
+		self.recorded_canvas.set_markers(None)
 		self.lead_trim_var.set(0.0)
 		self.tail_trim_var.set(0.0)
-		self._update_trim_value_labels()
-		self._refresh_durations()
+		self.pre_silence_var.set(0.0)
+		self.post_silence_var.set(0.0)
+		self.apply_trim_from_sliders()
 		self.status_var.set("Recording cleared. You can try again.")
+
+	def load_previous_item(self) -> None:
+		if self.current_index <= 0:
+			self.status_var.set("No previous item.")
+			return
+		self.current_index -= 1
+		self.current_item = self.items[self.current_index]
+		self._load_current_item()
+
+	def finalize_audio_for_save(self, audio: np.ndarray) -> np.ndarray:
+		# Ensure final saved audio matches the original source length if it can
+		if self.original_audio.size and audio.size:
+			target_seconds = float(self.original_audio.size) / float(max(1, self.original_rate))
+			target_len = int(round(target_seconds * float(max(1, self.recorded_rate))))
+			if audio.size == target_len:
+				return audio
+			if audio.size > target_len:
+				return audio[:target_len]
+			# pad with nothin to match length
+			pad = np.zeros(target_len - audio.size, dtype=np.float32)
+			return np.concatenate((audio, pad))
+		return audio
+
+	def check_completion(self) -> None:
+		missing = [it.relative_path.as_posix() for it in self.items if not it.target_path(self.assets_root).exists()]
+		if not missing:
+			messagebox.showinfo(APP_TITLE, "All items are present — no missing audio files.")
+		else:
+			messagebox.showinfo(APP_TITLE, f"Missing {len(missing)} files. Example: {missing[:10]}")
+
+	def export_zip(self) -> None:
+		base = Path(__file__).resolve().parent
+		src = base / "compressContents"
+		if not src.exists():
+			messagebox.showerror(APP_TITLE, f"Could not find compressContents to export: {src}")
+			return
+		selected = filedialog.asksaveasfilename(title="Export resource pack as zip", defaultextension=".zip", filetypes=[("Zip files", "*.zip")])
+		if not selected:
+			return
+		import shutil
+		try:
+			shutil.make_archive(Path(selected).with_suffix("").as_posix(), 'zip', root_dir=src)
+		except Exception as exc:
+			messagebox.showerror(APP_TITLE, f"Failed to create zip: {exc}")
+			return
+		messagebox.showinfo(APP_TITLE, f"Exported pack to {selected}")
 
 	def save_and_next(self) -> None:
 		if self.current_item is None:
@@ -567,11 +930,17 @@ class MinecraftRedubApp:
 		if self.recorded_audio.size == 0:
 			messagebox.showwarning(APP_TITLE, "Record audio before saving.")
 			return
+		if self.trim_too_long:
+			self.status_var.set(self.warning_var.get() or "Trimmed clip is too long to save yet.")
+			return
 
-		audio_to_save = self.trimmed_audio if self.trimmed_audio.size else self.recorded_audio
+		audio_to_save = self.aligned_audio if self.aligned_audio.size else (self.trimmed_audio if self.trimmed_audio.size else self.recorded_audio)
 		if audio_to_save.size == 0:
 			messagebox.showwarning(APP_TITLE, "The trimmed audio is empty. Adjust the trim or retry the recording.")
 			return
+
+		# match audio length
+		audio_to_save = self.finalize_audio_for_save(audio_to_save)
 
 		target_path = self.current_item.target_path(self.assets_root)
 		ensure_parent_dir(target_path)
@@ -583,13 +952,27 @@ class MinecraftRedubApp:
 			return
 
 		self.status_var.set(f"Saved {target_path.as_posix()}")
+		self._advance_to_next_item(clear_saved_take=True)
+
+	def next_without_saving(self) -> None:
+		self._advance_to_next_item(clear_saved_take=False)
+
+	def _advance_to_next_item(self, clear_saved_take: bool) -> None:
 		self.current_index += 1
-		self.recorded_audio = np.zeros(0, dtype=np.float32)
-		self.trimmed_audio = np.zeros(0, dtype=np.float32)
-		self.recorded_canvas.set_audio(None, reference_peak=self._waveform_reference_peak)
-		self._refresh_durations()
-		self._set_progress()
-		self._load_next_item()
+		if clear_saved_take:
+			self.recorded_audio = np.zeros(0, dtype=np.float32)
+			self.trimmed_audio = np.zeros(0, dtype=np.float32)
+			self.aligned_audio = np.zeros(0, dtype=np.float32)
+			self.recorded_canvas.set_audio(None, reference_peak=self._waveform_reference_peak)
+			self.recorded_canvas.set_markers(None)
+			self._refresh_durations()
+			self._set_progress()
+		try:
+			self._load_next_item()
+		except Exception as exc:
+			self.status_var.set(f"Could not load next item: {exc}")
+			self.save_button.configure(state="disabled")
+			self.record_button.configure(state="disabled")
 
 
 def build_default_paths() -> tuple[Path, Path, Path]:

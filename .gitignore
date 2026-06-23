@@ -1,7 +1,7 @@
-minecraftRedub/compressContents/assets/*
-!minecraftRedub/compressContents/assets
-minecraftRedub/objects/*
-minecraftRedub/__pycache__/
-minecraftRedub/*.pyc
-minecraftRedub/*.pyo
-minecraftRedub/*.pyd
+compressContents/assets/*
+!compressContents/assets
+objects/*
+__pycache__/
+*.pyc
+*.pyo
+*.pyd

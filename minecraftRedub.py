@@ -301,7 +301,6 @@ class MinecraftRedubApp:
 		self.record_button.pack(side="left")
 		ttk.Button(buttons, text="Previous", command=self.load_previous_item).pack(side="left", padx=(8, 0))
 		ttk.Button(buttons, text="Play Recorded", command=self.play_recorded).pack(side="left", padx=(8, 0))
-		ttk.Button(buttons, text="Apply Trim", command=self.apply_trim_from_sliders).pack(side="left", padx=(8, 0))
 		self.save_button = ttk.Button(buttons, text="Save & Next", command=self.save_and_next, style="Accent.TButton")
 		self.save_button.pack(side="right")
 		ttk.Button(buttons, text="Next Without Saving", command=self.next_without_saving).pack(side="right", padx=(8, 0))

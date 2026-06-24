@@ -199,6 +199,56 @@ class WaveformCanvas(ttk.Frame):
 			self._canvas.create_line(x, 0, x, height, fill="#ef4444", width=2)
 
 
+class Tooltip:
+	def __init__(self, widget: tk.Widget, text: str) -> None:
+		self.widget = widget
+		self.text = text
+		self.tipwindow: tk.Toplevel | None = None
+		self._after_id: str | None = None
+		widget.bind("<Enter>", self._schedule_show)
+		widget.bind("<Leave>", self._hide_tip)
+		widget.bind("<Motion>", self._move_tip)
+
+	def _schedule_show(self, _event: tk.Event) -> None:
+		self._after_id = self.widget.after(300, self._show_tip)
+
+	def _move_tip(self, event: tk.Event) -> None:
+		if self.tipwindow:
+			x = event.x_root + 16
+			y = event.y_root + 16
+			self.tipwindow.geometry(f"+{x}+{y}")
+
+	def _show_tip(self) -> None:
+		if self.tipwindow or not self.text:
+			return
+		x = self.widget.winfo_rootx() + 16
+		y = self.widget.winfo_rooty() + self.widget.winfo_height() + 8
+		self.tipwindow = tk.Toplevel(self.widget)
+		self.tipwindow.wm_overrideredirect(True)
+		self.tipwindow.wm_geometry(f"+{x}+{y}")
+		label = tk.Label(
+			self.tipwindow,
+			text=self.text,
+			justify="left",
+			background="#111827",
+			foreground="#f8fafc",
+			relief="solid",
+			borderwidth=1,
+			font=("Segoe UI", 9),
+			padx=6,
+			pady=4,
+		)
+		label.pack()
+
+	def _hide_tip(self, _event: tk.Event | None = None) -> None:
+		if self._after_id is not None:
+			self.widget.after_cancel(self._after_id)
+			self._after_id = None
+		if self.tipwindow:
+			self.tipwindow.destroy()
+			self.tipwindow = None
+
+
 class MinecraftRedubApp:
 	def __init__(self, root: tk.Tk, index_path: Path, assets_root: Path, objects_root: Path) -> None:
 		self.root = root
@@ -319,7 +369,7 @@ class MinecraftRedubApp:
 		ttk.Button(buttons, text="Previous", command=self.load_previous_item, style="Accent.TButton").pack(side="left", padx=(0, 8))
 		ttk.Button(buttons, text="Play Recorded", command=self.play_recorded, style="Accent.TButton").pack(side="left", padx=(0, 8))
 		# Place 'Next Without Saving' immediately to the right of 'Play Recorded'
-		ttk.Button(buttons, text="Next Without Saving", command=self.next_without_saving, style="Accent.TButton").pack(side="left", padx=(0, 8))
+		ttk.Button(buttons, text="Next But Dont Save", command=self.next_without_saving, style="Accent.TButton").pack(side="left", padx=(0, 8))
 		# Keep Save on the far right
 		self.save_button = ttk.Button(buttons, text="Save & Next", command=self.save_and_next, style="Accent.TButton")
 		self.save_button.pack(side="right")
@@ -369,18 +419,49 @@ class MinecraftRedubApp:
 
 		footer = ttk.Frame(outer)
 		footer.pack(fill="x", pady=(12, 0))
-		ttk.Label(
-			footer,
+		footer_row = ttk.Frame(footer)
+		footer_row.pack(fill="x")
+		footer_label = ttk.Label(
+			footer_row,
 			text=(
 				"Recording starts after a short delay so the key or click used to trigger it is not captured. "
 				"Adjust trim if needed, then hit save."
 			),
 			style="Muted.TLabel",
-			wraplength=1100,
+			wraplength=940,
 			justify="left",
-		).pack(anchor="w")
+		)
+		footer_label.pack(side="left", fill="x", expand=True)
+		hint_label = ttk.Label(footer_row, text="Keyboard shortcuts", style="Muted.TLabel", cursor="question_arrow")
+		hint_label.pack(side="right")
+		Tooltip(
+			hint_label,
+			"Left / A: Previous\n"
+			"Right / D: Next but don't save\n"
+			"Down / S: Play recorded\n"
+			"Space: Start/Stop recording\n"
+			"Enter: Save & Next\n"
+			"P: Play original",
+		)
 
 		self.root.bind("<Configure>", lambda _event: self.root.after_idle(self._refresh_canvases))
+		self._bind_keyboard_shortcuts()
+
+	def _bind_keyboard_shortcuts(self) -> None:
+		for sequence in ("<Left>", "<Key-a>"):
+			self.root.bind(sequence, lambda event: self._invoke_action(self.load_previous_item, event))
+		for sequence in ("<Right>", "<Key-d>"):
+			self.root.bind(sequence, lambda event: self._invoke_action(self.next_without_saving, event))
+		for sequence in ("<Down>", "<Key-s>"):
+			self.root.bind(sequence, lambda event: self._invoke_action(self.play_recorded, event))
+		self.root.bind("<space>", lambda event: self._invoke_action(self.toggle_recording, event))
+		self.root.bind("<Return>", lambda event: self._invoke_action(self.save_and_next, event))
+		self.root.bind("<Key-p>", lambda event: self._invoke_action(self.play_original, event))
+
+	def _invoke_action(self, action: callable[[], None], event: tk.Event) -> str:
+		event.widget.focus_set()
+		action()
+		return "break"
 
 	def choose_index_file(self) -> None:
 		selected = filedialog.askopenfilename(title="Choose index file", initialdir=str(self.index_path.parent), filetypes=[("JSON files", "*.json"), ("All files", "*")])

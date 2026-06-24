@@ -281,8 +281,10 @@ class MinecraftRedubApp:
 		# Top-right actions
 		header_actions = ttk.Frame(header)
 		header_actions.pack(side="right", anchor="e")
-		ttk.Button(header_actions, text="Export Zip", command=self.export_zip).pack(side="right", padx=(8, 0))
-		ttk.Button(header_actions, text="Check Completion", command=self.check_completion).pack(side="right", padx=(8, 0))
+		# Moved 'Open Index File' here per UI reorder
+		tk.Button(header_actions, text="Export Zip", command=self.export_zip).pack(side="right", padx=(8, 0))
+		tk.Button(header_actions, text="Check Completion", command=self.check_completion).pack(side="right", padx=(8, 0))
+		tk.Button(header_actions, text="Open Index File", command=self.choose_index_file).pack(side="right", padx=(8, 0))
 
 		status_bar = ttk.Frame(outer, style="Card.TFrame", padding=12)
 		status_bar.pack(fill="x", pady=(0, 12))
@@ -303,7 +305,9 @@ class MinecraftRedubApp:
 		ttk.Label(left_controls, text="Source Audio", style="Card.TLabel", font=("Segoe UI", 11, "bold")).pack(anchor="w")
 		ttk.Label(left_controls, textvariable=self.original_duration_var, style="Card.TLabel").pack(anchor="w", pady=(2, 0))
 		ttk.Button(left_controls, text="Play Original", command=self.play_original, style="Accent.TButton").pack(anchor="w", pady=(10, 0))
-		ttk.Button(left_controls, text="Open Index File", command=self.choose_index_file).pack(anchor="w", pady=(8, 0))
+		# Move the Start Recording button to the left controls area (replacing the old Open Index placement)
+		self.record_button = ttk.Button(left_controls, text="Start Recording", command=self.toggle_recording, style="Accent.TButton")
+		self.record_button.pack(anchor="w", pady=(8, 0))
 
 		ttk.Label(right_controls, text="Recording Workflow", style="Card.TLabel", font=("Segoe UI", 11, "bold")).pack(anchor="w")
 		ttk.Label(right_controls, textvariable=self.recorded_duration_var, style="Card.TLabel").pack(anchor="w", pady=(2, 0))
@@ -312,13 +316,13 @@ class MinecraftRedubApp:
 
 		buttons = ttk.Frame(right_controls, style="Card.TFrame")
 		buttons.pack(anchor="w", pady=(10, 0), fill="x")
-		self.record_button = ttk.Button(buttons, text="Start Recording", command=self.toggle_recording, style="Accent.TButton")
-		self.record_button.pack(side="left")
-		ttk.Button(buttons, text="Previous", command=self.load_previous_item).pack(side="left", padx=(8, 0))
-		ttk.Button(buttons, text="Play Recorded", command=self.play_recorded).pack(side="left", padx=(8, 0))
+		ttk.Button(buttons, text="Previous", command=self.load_previous_item, style="Accent.TButton").pack(side="left", padx=(0, 8))
+		ttk.Button(buttons, text="Play Recorded", command=self.play_recorded, style="Accent.TButton").pack(side="left", padx=(0, 8))
+		# Place 'Next Without Saving' immediately to the right of 'Play Recorded'
+		ttk.Button(buttons, text="Next Without Saving", command=self.next_without_saving, style="Accent.TButton").pack(side="left", padx=(0, 8))
+		# Keep Save on the far right
 		self.save_button = ttk.Button(buttons, text="Save & Next", command=self.save_and_next, style="Accent.TButton")
 		self.save_button.pack(side="right")
-		ttk.Button(buttons, text="Next Without Saving", command=self.next_without_saving).pack(side="right", padx=(8, 0))
 
 		trim_panel = ttk.Frame(outer, style="Card.TFrame", padding=12)
 		trim_panel.pack(fill="x", pady=(0, 12))

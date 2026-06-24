@@ -266,8 +266,13 @@ class MinecraftRedubApp:
 
 		header = ttk.Frame(outer)
 		header.pack(fill="x", pady=(0, 12))
-		ttk.Label(header, text="Minecraft Redub", style="Title.TLabel").pack(anchor="w")
-		ttk.Label(header, text="Record, trim, preview, and save redubbed sound assets in sequence.", style="Muted.TLabel").pack(anchor="w", pady=(3, 0))
+		ttk.Label(header, text="Minecraft Redub", style="Title.TLabel").pack(side="left", anchor="w")
+		ttk.Label(header, text="Record, trim, preview, and save redubbed sound assets in sequence.", style="Muted.TLabel").pack(side="left", anchor="w", pady=(3, 0), padx=(8,0))
+		# Top-right actions
+		header_actions = ttk.Frame(header)
+		header_actions.pack(side="right", anchor="e")
+		ttk.Button(header_actions, text="Export Zip", command=self.export_zip).pack(side="right", padx=(8, 0))
+		ttk.Button(header_actions, text="Check Completion", command=self.check_completion).pack(side="right", padx=(8, 0))
 
 		status_bar = ttk.Frame(outer, style="Card.TFrame", padding=12)
 		status_bar.pack(fill="x", pady=(0, 12))
@@ -304,8 +309,6 @@ class MinecraftRedubApp:
 		self.save_button = ttk.Button(buttons, text="Save & Next", command=self.save_and_next, style="Accent.TButton")
 		self.save_button.pack(side="right")
 		ttk.Button(buttons, text="Next Without Saving", command=self.next_without_saving).pack(side="right", padx=(8, 0))
-		ttk.Button(buttons, text="Export Zip", command=self.export_zip).pack(side="right", padx=(8,8))
-		ttk.Button(buttons, text="Check Completion", command=self.check_completion).pack(side="right", padx=(8,0))
 
 		trim_panel = ttk.Frame(outer, style="Card.TFrame", padding=12)
 		trim_panel.pack(fill="x", pady=(0, 12))

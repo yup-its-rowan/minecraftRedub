@@ -277,7 +277,7 @@ class MinecraftRedubApp:
 		header = ttk.Frame(outer)
 		header.pack(fill="x", pady=(0, 12))
 		ttk.Label(header, text="Minecraft Redub", style="Title.TLabel").pack(side="left", anchor="w")
-		ttk.Label(header, text="Record, trim, preview, and save redubbed sound assets in sequence.", style="Muted.TLabel").pack(side="left", anchor="w", pady=(3, 0), padx=(8,0))
+		ttk.Label(header, text="Put a new spin on minecraft sound effects with your own resource pack", style="Muted.TLabel").pack(side="left", anchor="w", pady=(3, 0), padx=(8,0))
 		# Top-right actions
 		header_actions = ttk.Frame(header)
 		header_actions.pack(side="right", anchor="e")
@@ -372,7 +372,7 @@ class MinecraftRedubApp:
 			footer,
 			text=(
 				"Recording starts after a short delay so the key or click used to trigger it is not captured. "
-				"Adjust trim if needed, then save the sound into the mirrored asset path."
+				"Adjust trim if needed, then hit save."
 			),
 			style="Muted.TLabel",
 			wraplength=1100,
@@ -986,7 +986,13 @@ class MinecraftRedubApp:
 				pass
 
 	def next_without_saving(self) -> None:
-		self._advance_to_next_item(clear_saved_take=False)
+		# Advance by a single index (do not skip to the next missing file)
+		if self.current_index >= len(self.items) - 1:
+			self.status_var.set("No next item.")
+			return
+		self.current_index += 1
+		self.current_item = self.items[self.current_index]
+		self._load_current_item()
 
 	def _advance_to_next_item(self, clear_saved_take: bool) -> None:
 		self.current_index += 1

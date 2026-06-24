@@ -38,3 +38,11 @@ I was given a nice start, but theres a lot to do from here.
 A lot of the changes that I wanted to make have been made. Now the program is more or less functional. There are still some pain points relating to the UI, as well as some trouble im having with the previous/next buttons (i want to view my previous try at recreation when i go back so i can see in the moment if the recording should be re-recorded). Regardless, we hit strong progress and i got a couple recordings in. The most technical part of this was creating another set of audio sliders to pad the recorded audio, and hooking up both sets of sliders to themselves so that we couldn't overlap the start and end locations for the crops. Also adding more bars in the canvas. 
 
 The only sad part is that the recordings created so far are of cave audio (since its the first), which is to my knowledge just random orchestral hits. Which sound bad and weird to recreate with only your mouth. Only 4400 to go!
+
+## Day 5
+
+Everything is pretty much usable right now. The only things I want to change are making it prettier and binding keyboard keys to the buttons.
+
+I had some major issues today, one of my audio clips wasn't saving and would instead just crash the entire program. When I would go back, an audio .ogg file would be saved in the tree, but it wouldn't contain the actual audio, instead just corrupted garbage. The audio file in question was only the very first one, so I originally thought it had to do with some weird array counter at zero error or something, but it was actually completely unrelated. Turns out that the encoder I was using couldn't handle arbitrary khz ranges, so now we downsample before we save to make sure things can actually be held in data. We can also check this by opening the files, something I was just not doing because I was lazy.
+
+Anyway things are good, going to plan some design changes and then add keyboard bindings and then I guess we start churning out recordings! Oh yeah and make an actual readme.md so that people know how to use this and what this is. Cool!!!

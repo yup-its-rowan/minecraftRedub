@@ -837,6 +837,7 @@ class MinecraftRedubApp:
 		else:
 			preview_audio = self.trimmed_audio if self.trimmed_audio.size else self.recorded_audio
 
+		# to make sure that the waveform's y axis is scaled to the original audio's peak y val 
 		self.recorded_canvas.set_audio(preview_audio if preview_audio.size else None, self.recorded_rate, reference_peak=self._waveform_reference_peak)
 		self.recorded_canvas.set_markers(self._aligned_clip_markers() if self.aligned_audio.size else None)
 
@@ -876,6 +877,7 @@ class MinecraftRedubApp:
 			self.status_var.set("Trim/placement updated. Preview again or save the file.")
 
 	def retry_recording(self) -> None:
+		# idk if this is even used anymore haha
 		if self.recording:
 			self.stop_recording()
 		self.recorded_audio = np.zeros(0, dtype=np.float32)
@@ -892,6 +894,7 @@ class MinecraftRedubApp:
 		self.status_var.set("Recording cleared. You can try again.")
 
 	def load_previous_item(self) -> None:
+		# to match the "next" button, this will just move down by 1 and load the previous item, no saving or anything
 		if self.current_index <= 0:
 			self.status_var.set("No previous item.")
 			return
@@ -900,7 +903,7 @@ class MinecraftRedubApp:
 		self._load_current_item()
 
 	def finalize_audio_for_save(self, audio: np.ndarray) -> np.ndarray:
-		# Ensure final saved audio matches the original source length if it can
+		# audio lengths NEED to match or else
 		if self.original_audio.size and audio.size:
 			target_seconds = float(self.original_audio.size) / float(max(1, self.original_rate))
 			target_len = int(round(target_seconds * float(max(1, self.recorded_rate))))
@@ -914,6 +917,7 @@ class MinecraftRedubApp:
 		return audio
 
 	def check_completion(self) -> None:
+		# this is more "just in case" and lowkey ill probably remove it later. i could also make it actually open all these files to make sure the files are valid 
 		missing = [it.relative_path.as_posix() for it in self.items if not it.target_path(self.assets_root).exists()]
 		if not missing:
 			messagebox.showinfo(APP_TITLE, "All items are present — no missing audio files.")
@@ -921,6 +925,7 @@ class MinecraftRedubApp:
 			messagebox.showinfo(APP_TITLE, f"Missing {len(missing)} files. Example: {missing[:10]}")
 
 	def export_zip(self) -> None:
+		# idk if this works, if this comment is still here by the time its tested in a stable state, then it probably does
 		base = Path(__file__).resolve().parent
 		src = base / "compressContents"
 		if not src.exists():
@@ -961,6 +966,8 @@ class MinecraftRedubApp:
 
 			try:
     			# normalize type / remove NaNs/infs to avoid libsndfile crashes
+				# this part sucked cause randomly some files would not save, turned out because what we were using to save into .ogg didn't handle super big khz
+				# so we resample to 48k if the recorded rate is higher than that, which isn't the max but is lowkey good enough
 				audio_to_save = np.asarray(audio_to_save, dtype=np.float32)
 				audio_to_save = np.nan_to_num(audio_to_save, nan=0.0, posinf=0.0, neginf=0.0)
 				disk_rate = int(round(self.recorded_rate))
@@ -978,7 +985,7 @@ class MinecraftRedubApp:
 			self._advance_to_next_item(clear_saved_take=True)
 			
 		except Exception as exc:
-			# Catch-all to prevent the app from crashing; surface the error to the user and disable controls
+			# if theres a save error we should see it
 			messagebox.showerror(APP_TITLE, f"Unexpected error while saving: {exc}")
 			self.status_var.set(f"Save failed: {exc}")
 			try:
@@ -987,7 +994,7 @@ class MinecraftRedubApp:
 				pass
 
 	def next_without_saving(self) -> None:
-		# Advance by a single index (do not skip to the next missing file)
+		# move up by 1, mirror logic for "previous" and still don't save anything
 		if self.current_index >= len(self.items) - 1:
 			self.status_var.set("No next item.")
 			return
@@ -996,6 +1003,7 @@ class MinecraftRedubApp:
 		self._load_current_item()
 
 	def _advance_to_next_item(self, clear_saved_take: bool) -> None:
+		# this is for the next item without audio, should probably rename
 		self.current_index += 1
 		if clear_saved_take:
 			self.recorded_audio = np.zeros(0, dtype=np.float32)

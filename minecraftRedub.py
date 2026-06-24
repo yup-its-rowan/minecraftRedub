@@ -83,7 +83,7 @@ def initialize_savestate(base_path: Path) -> str:
 		text = savestate_path.read_text(encoding="utf-8").strip()
 		count = int(text)
 	except (OSError, ValueError):
-		# silently fail if the file content is not a number
+		# silently fail if not a number cause idk
 		pass
 	else:
 		count += 1

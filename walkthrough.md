@@ -41,8 +41,8 @@ The only sad part is that the recordings created so far are of cave audio (since
 
 ## Day 5
 
-Everything is pretty much usable right now. The only things I want to change are making it prettier and binding keyboard keys to the buttons.
+Everything is pretty much usable right now. The only things I want to change are making it prettier and adding "profiles" for different groups of audios you'd want to dub. Like a group including just animal noises, for those who don't want to dub cave sounds lol.
 
 I had some major issues today, one of my audio clips wasn't saving and would instead just crash the entire program. When I would go back, an audio .ogg file would be saved in the tree, but it wouldn't contain the actual audio, instead just corrupted garbage. The audio file in question was only the very first one, so I originally thought it had to do with some weird array counter at zero error or something, but it was actually completely unrelated. Turns out that the encoder I was using couldn't handle arbitrary khz ranges, so now we downsample before we save to make sure things can actually be held in data. We can also check this by opening the files, something I was just not doing because I was lazy.
 
-Anyway things are good, going to plan some design changes and then add keyboard bindings and then I guess we start churning out recordings! Oh yeah and make an actual readme.md so that people know how to use this and what this is. Cool!!!
+Anyway things are good, going to plan some design changes and then I guess we start churning out recordings! Oh yeah and make an actual readme.md so that people know how to use this and what this is. Cool!!!

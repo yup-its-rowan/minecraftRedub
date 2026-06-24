@@ -130,6 +130,16 @@ def apply_manual_trim(audio: np.ndarray, sample_rate: int, lead_ms: float, tail_
 
 	return result
 
+def resample_audio(audio: np.ndarray, src_sr: int, dst_sr: int) -> np.ndarray:
+    if audio.size == 0 or src_sr == dst_sr:
+        return audio
+    duration = float(audio.size) / float(src_sr)
+    new_len = int(round(duration * float(dst_sr)))
+    if new_len <= 0:
+        return np.zeros(0, dtype=np.float32)
+    src_positions = np.linspace(0.0, duration, num=audio.size, endpoint=False)
+    dst_positions = np.linspace(0.0, duration, num=new_len, endpoint=False)
+    return np.interp(dst_positions, src_positions, audio).astype(np.float32)
 
 class WaveformCanvas(ttk.Frame):
 	def __init__(self, master: tk.Misc, title: str, color: str) -> None:
@@ -927,34 +937,53 @@ class MinecraftRedubApp:
 		messagebox.showinfo(APP_TITLE, f"Exported pack to {selected}")
 
 	def save_and_next(self) -> None:
-		if self.current_item is None:
-			return
-		if self.recorded_audio.size == 0:
-			messagebox.showwarning(APP_TITLE, "Record audio before saving.")
-			return
-		if self.trim_too_long:
-			self.status_var.set(self.warning_var.get() or "Trimmed clip is too long to save yet.")
-			return
-
-		audio_to_save = self.aligned_audio if self.aligned_audio.size else (self.trimmed_audio if self.trimmed_audio.size else self.recorded_audio)
-		if audio_to_save.size == 0:
-			messagebox.showwarning(APP_TITLE, "The trimmed audio is empty. Adjust the trim or retry the recording.")
-			return
-
-		# match audio length
-		audio_to_save = self.finalize_audio_for_save(audio_to_save)
-
-		target_path = self.current_item.target_path(self.assets_root)
-		ensure_parent_dir(target_path)
-
 		try:
-			sf.write(target_path, audio_to_save, self.recorded_rate, format="OGG", subtype="VORBIS")
-		except Exception as exc:
-			messagebox.showerror(APP_TITLE, f"Failed to save {target_path.as_posix()}\n\n{exc}")
-			return
+			if self.current_item is None:
+				return
+			if self.recorded_audio.size == 0:
+				messagebox.showwarning(APP_TITLE, "Record audio before saving.")
+				return
+			if self.trim_too_long:
+				self.status_var.set(self.warning_var.get() or "Trimmed clip is too long to save yet.")
+				return
 
-		self.status_var.set(f"Saved {target_path.as_posix()}")
-		self._advance_to_next_item(clear_saved_take=True)
+			audio_to_save = self.aligned_audio if self.aligned_audio.size else (self.trimmed_audio if self.trimmed_audio.size else self.recorded_audio)
+			if audio_to_save.size == 0:
+				messagebox.showwarning(APP_TITLE, "The trimmed audio is empty. Adjust the trim or retry the recording.")
+				return
+
+			# match audio length
+			audio_to_save = self.finalize_audio_for_save(audio_to_save)
+
+			target_path = self.current_item.target_path(self.assets_root)
+			ensure_parent_dir(target_path)
+
+			try:
+    			# normalize type / remove NaNs/infs to avoid libsndfile crashes
+				audio_to_save = np.asarray(audio_to_save, dtype=np.float32)
+				audio_to_save = np.nan_to_num(audio_to_save, nan=0.0, posinf=0.0, neginf=0.0)
+				disk_rate = int(round(self.recorded_rate))
+				audio_for_disk = audio_to_save
+				if disk_rate > 48000:
+					audio_for_disk = resample_audio(audio_to_save, disk_rate, 48000)
+					disk_rate = 48000
+				audio_for_disk = np.ascontiguousarray(audio_for_disk, dtype=np.float32)
+				sf.write(target_path, audio_for_disk, disk_rate, format="OGG", subtype="VORBIS")
+			except Exception as exc:
+				messagebox.showerror(APP_TITLE, f"Failed to save {target_path.as_posix()}\n\n{exc}")
+				return
+
+			self.status_var.set(f"Saved {target_path.as_posix()}")
+			self._advance_to_next_item(clear_saved_take=True)
+			
+		except Exception as exc:
+			# Catch-all to prevent the app from crashing; surface the error to the user and disable controls
+			messagebox.showerror(APP_TITLE, f"Unexpected error while saving: {exc}")
+			self.status_var.set(f"Save failed: {exc}")
+			try:
+				self.save_button.configure(state="disabled")
+			except Exception:
+				pass
 
 	def next_without_saving(self) -> None:
 		self._advance_to_next_item(clear_saved_take=False)

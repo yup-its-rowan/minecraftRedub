@@ -1,6 +1,7 @@
 compressContents/assets/*
 !compressContents/assets
 objects/*
+savestate.txt
 __pycache__/
 *.pyc
 *.pyo

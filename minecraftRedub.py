@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import queue
+import random
 import threading
 import time
 from dataclasses import dataclass
@@ -15,7 +16,12 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 
-APP_TITLE = "Minecraft Redub"
+APP_TITLE = "minecraft redub"
+ALTERNATE_APP_TITLES = [
+	"MINECRAFT REDUB",
+	"minecraft redubski",
+	"mimecrafl redvb"
+]
 DEFAULT_INDEX_FILE = "29.json"
 DEFAULT_ASSETS_ROOT = Path("compressContents") / "assets"
 DEFAULT_OBJECTS_ROOT = Path("objects")
@@ -61,6 +67,35 @@ def load_audio_items(index_path: Path) -> list[AudioItem]:
 
 def ensure_parent_dir(path: Path) -> None:
 	path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def initialize_savestate(base_path: Path) -> str:
+	savestate_path = base_path / "savestate.txt"
+	if not savestate_path.exists():
+		try:
+			savestate_path.write_text("1", encoding="utf-8")
+		except OSError:
+			pass
+		return APP_TITLE
+
+	app_title = APP_TITLE
+	try:
+		text = savestate_path.read_text(encoding="utf-8").strip()
+		count = int(text)
+	except (OSError, ValueError):
+		# silently fail if the file content is not a number
+		pass
+	else:
+		count += 1
+		try:
+			savestate_path.write_text(str(count), encoding="utf-8")
+		except OSError:
+			pass
+		randomNum = random.randint(0, 100)
+		if randomNum > 40:
+			return APP_TITLE
+		app_title = random.choice(ALTERNATE_APP_TITLES)
+	return app_title
 
 
 def safe_relative_audio(path: Path) -> Path:
@@ -354,9 +389,9 @@ class MinecraftRedubApp:
 
 		ttk.Label(left_controls, text="Source Audio", style="Card.TLabel", font=("Segoe UI", 11, "bold")).pack(anchor="w")
 		ttk.Label(left_controls, textvariable=self.original_duration_var, style="Card.TLabel").pack(anchor="w", pady=(2, 0))
-		ttk.Button(left_controls, text="Play Original", command=self.play_original, style="Accent.TButton").pack(anchor="w", pady=(10, 0))
+		ttk.Button(left_controls, text="Play Original", command=self.play_original, style="Accent.TButton", takefocus=False).pack(anchor="w", pady=(10, 0))
 		# Move the Start Recording button to the left controls area (replacing the old Open Index placement)
-		self.record_button = ttk.Button(left_controls, text="Start Recording", command=self.toggle_recording, style="Accent.TButton")
+		self.record_button = ttk.Button(left_controls, text="Start Recording", command=self.toggle_recording, style="Accent.TButton", takefocus=False)
 		self.record_button.pack(anchor="w", pady=(8, 0))
 
 		ttk.Label(right_controls, text="Recording Workflow", style="Card.TLabel", font=("Segoe UI", 11, "bold")).pack(anchor="w")
@@ -366,12 +401,12 @@ class MinecraftRedubApp:
 
 		buttons = ttk.Frame(right_controls, style="Card.TFrame")
 		buttons.pack(anchor="w", pady=(10, 0), fill="x")
-		ttk.Button(buttons, text="Previous", command=self.load_previous_item, style="Accent.TButton").pack(side="left", padx=(0, 8))
-		ttk.Button(buttons, text="Play Recorded", command=self.play_recorded, style="Accent.TButton").pack(side="left", padx=(0, 8))
+		ttk.Button(buttons, text="Previous", command=self.load_previous_item, style="Accent.TButton", takefocus=False).pack(side="left", padx=(0, 8))
+		ttk.Button(buttons, text="Play Recorded", command=self.play_recorded, style="Accent.TButton", takefocus=False).pack(side="left", padx=(0, 8))
 		# Place 'Next Without Saving' immediately to the right of 'Play Recorded'
-		ttk.Button(buttons, text="Next But Dont Save", command=self.next_without_saving, style="Accent.TButton").pack(side="left", padx=(0, 8))
+		ttk.Button(buttons, text="Next But Dont Save", command=self.next_without_saving, style="Accent.TButton", takefocus=False).pack(side="left", padx=(0, 8))
 		# Keep Save on the far right
-		self.save_button = ttk.Button(buttons, text="Save & Next", command=self.save_and_next, style="Accent.TButton")
+		self.save_button = ttk.Button(buttons, text="Save & Next", command=self.save_and_next, style="Accent.TButton", takefocus=False)
 		self.save_button.pack(side="right")
 
 		trim_panel = ttk.Frame(outer, style="Card.TFrame", padding=12)
@@ -1108,6 +1143,10 @@ def build_default_paths() -> tuple[Path, Path, Path]:
 
 
 def main() -> None:
+	base = Path(__file__).resolve().parent
+	global APP_TITLE
+	APP_TITLE = initialize_savestate(base)
+
 	index_path, assets_root, objects_root = build_default_paths()
 	if not index_path.exists():
 		raise FileNotFoundError(f"Could not find index file: {index_path}")

@@ -49,4 +49,6 @@ Anyway things are good, going to plan some design changes and then I guess we st
 
 ## Day 6
 
-Progression isnt tracked correctly if you go previous or next. also, make sure that pressing any buttons cuts off the current audio. Blergh.
+First I fixed an "issue" that was bothering me. Basically, pressing buttons didn't cut off audio, so you'd just waste time waiting for clips to finish. That was like 10 lines of code and makes the experience so much better. I've also decided to name the profiles I was yabbing about earlier "bundles" cause its cute.
+
+Unfortunately p isnt tracked correctly if you go previous or next, because I didn't think of that. Also I have to change it anyway for the bundles. Blergh.

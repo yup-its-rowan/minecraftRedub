@@ -46,3 +46,7 @@ Everything is pretty much usable right now. The only things I want to change are
 I had some major issues today, one of my audio clips wasn't saving and would instead just crash the entire program. When I would go back, an audio .ogg file would be saved in the tree, but it wouldn't contain the actual audio, instead just corrupted garbage. The audio file in question was only the very first one, so I originally thought it had to do with some weird array counter at zero error or something, but it was actually completely unrelated. Turns out that the encoder I was using couldn't handle arbitrary khz ranges, so now we downsample before we save to make sure things can actually be held in data. We can also check this by opening the files, something I was just not doing because I was lazy.
 
 Anyway things are good, going to plan some design changes and then I guess we start churning out recordings! Oh yeah and make an actual readme.md so that people know how to use this and what this is. Cool!!!
+
+## Day 6
+
+Progression isnt tracked correctly if you go previous or next. also, make sure that pressing any buttons cuts off the current audio. Blergh.

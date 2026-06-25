@@ -474,9 +474,9 @@ class MinecraftRedubApp:
 			"Left / A: Previous\n"
 			"Right / D: Next but don't save\n"
 			"Down / S: Play recorded\n"
+			"Up / W: Play original\n"
 			"Space: Start/Stop recording\n"
 			"Enter: Save & Next\n"
-			"P: Play original",
 		)
 
 		self.root.bind("<Configure>", lambda _event: self.root.after_idle(self._refresh_canvases))
@@ -489,9 +489,10 @@ class MinecraftRedubApp:
 			self.root.bind(sequence, lambda event: self._invoke_action(self.next_without_saving, event))
 		for sequence in ("<Down>", "<Key-s>"):
 			self.root.bind(sequence, lambda event: self._invoke_action(self.play_recorded, event))
+		for sequence in ("<Up>", "<Key-w>"):
+			self.root.bind(sequence, lambda event: self._invoke_action(self.play_original, event))
 		self.root.bind("<space>", lambda event: self._invoke_action(self.toggle_recording, event))
 		self.root.bind("<Return>", lambda event: self._invoke_action(self.save_and_next, event))
-		self.root.bind("<Key-p>", lambda event: self._invoke_action(self.play_original, event))
 
 	def _invoke_action(self, action: callable[[], None], event: tk.Event) -> str:
 		event.widget.focus_set()

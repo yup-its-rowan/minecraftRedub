@@ -51,4 +51,6 @@ Anyway things are good, going to plan some design changes and then I guess we st
 
 First I fixed an "issue" that was bothering me. Basically, pressing buttons didn't cut off audio, so you'd just waste time waiting for clips to finish. That was like 10 lines of code and makes the experience so much better. I rebound playing the old sound to "w" or "up arrow" as well, I don't know why I chose "p" of all keybinds. Horrific choice haha. I've also decided to name the profiles I was yabbing about earlier "bundles" cause its cute.
 
-Unfortunately progression isnt tracked correctly if you go previous or next, because I didn't think of that. Also I have to change it anyway for the bundles. Blergh.
+The issue I'm running into right now is the right data structure to handle all the bundles. Ideally, clicking on an item in the bundle takes you to the recording of the item. Right now we have a big json object, but nothing relational. We really need something that can correlate index, filepath, a variable for whether or not it is used in the savestate, and maybe even another boolean for whether or not it has audio attached to it. I'm trying to think of anything else we might need but IDK if future proofing is what i should be focusing on. 
+
+Unfortunately progression is also not tracked correctly if you go previous or next, because I didn't think of that. And I have to change it anyway for the bundles. Blergh.

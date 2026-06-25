@@ -781,6 +781,7 @@ class MinecraftRedubApp:
 	def play_original(self) -> None:
 		if self.original_audio.size == 0:
 			return
+		self._stop_playing_audio()
 		self._play_audio(self.original_audio, self.original_rate)
 
 	def play_recorded(self) -> None:
@@ -788,7 +789,14 @@ class MinecraftRedubApp:
 		rate = self.recorded_rate if audio.size else DEFAULT_SAMPLE_RATE
 		if audio.size == 0:
 			return
+		self._stop_playing_audio()
 		self._play_audio(audio, rate)
+
+	def _stop_playing_audio(self) -> None:
+		try:
+			sd.stop()
+		except Exception:
+			pass
 
 	def _play_audio(self, audio: np.ndarray, sample_rate: int) -> None:
 		def worker() -> None:
@@ -816,6 +824,7 @@ class MinecraftRedubApp:
 		if self.recording or self._recording_thread is not None:
 			return
 
+		self._stop_playing_audio()
 		self.recording_ready = False
 		self.record_button.configure(text="Stop Recording")
 		self.status_var.set(f"Recording will start in {self.record_delay_ms / 1000:.2f}s. Release the trigger now.")
@@ -1010,6 +1019,7 @@ class MinecraftRedubApp:
 		self.status_var.set("Recording cleared. You can try again.")
 
 	def load_previous_item(self) -> None:
+		self._stop_playing_audio()
 		# to match the "next" button, this will just move down by 1 and load the previous item, no saving or anything
 		if self.current_index <= 0:
 			self.status_var.set("No previous item.")
@@ -1059,6 +1069,7 @@ class MinecraftRedubApp:
 		messagebox.showinfo(APP_TITLE, f"Exported pack to {selected}")
 
 	def save_and_next(self) -> None:
+		self._stop_playing_audio()
 		try:
 			if self.current_item is None:
 				return
@@ -1110,6 +1121,7 @@ class MinecraftRedubApp:
 				pass
 
 	def next_without_saving(self) -> None:
+		self._stop_playing_audio()
 		# move up by 1, mirror logic for "previous" and still don't save anything
 		if self.current_index >= len(self.items) - 1:
 			self.status_var.set("No next item.")

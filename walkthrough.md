@@ -54,3 +54,11 @@ First I fixed an "issue" that was bothering me. Basically, pressing buttons didn
 The issue I'm running into right now is the right data structure to handle all the bundles. Ideally, clicking on an item in the bundle takes you to the recording of the item. Right now we have a big json object, but nothing relational. We really need something that can correlate index, filepath, a variable for whether or not it is used in the savestate, and maybe even another boolean for whether or not it has audio attached to it. I'm trying to think of anything else we might need but IDK if future proofing is what i should be focusing on. 
 
 Unfortunately progression is also not tracked correctly if you go previous or next, because I didn't think of that. And I have to change it anyway for the bundles. Blergh.
+
+## Day 7
+
+Instead of resting, we took steps towards bundle functionality. After fixing some random bullshit that was bothering me, we added the ability to choose which sounds we are to record, and to skip around and choose sounds a lot easier. This is also interfaced with our "next", "previous", and "completion %" things that we made previously.
+
+In terms of other stuff to add, I want to prepackage some "bundles" with the program with escalating difficulties of redubbing. And also I would really like to auto create duplicate sounds for when you dub over a sound that has multiple takes. For example there are many different placing sounds so that placing many of the same block doesn't sound repetitive. However dubbing each block four times is beyond tedious, so there's probably something I can do there, maybe a toggle or something I am not yet sure.
+
+Yippee we are almost there.

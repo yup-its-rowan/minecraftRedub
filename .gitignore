@@ -2,6 +2,7 @@ compressContents/assets/*
 !compressContents/assets
 objects/*
 savestate.txt
+*.selection.json
 __pycache__/
 *.pyc
 *.pyo

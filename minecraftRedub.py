@@ -44,6 +44,128 @@ class AudioItem:
 		return assets_root / self.relative_path
 
 
+@dataclass
+class SelectionTreeNode:
+	name: str
+	full_path: str
+	parent: SelectionTreeNode | None
+	children: dict[str, "SelectionTreeNode"]
+	is_file: bool
+	checked: bool = False
+	partial: bool = False
+
+	def update_state_from_children(self) -> None:
+		if self.is_file:
+			self.partial = False
+			return
+
+		if not self.children:
+			self.checked = False
+			self.partial = False
+			return
+
+		child_states = [child.checked or child.partial for child in self.children.values()]
+		all_checked = all(child.checked and not child.partial for child in self.children.values())
+		any_checked = any(child.checked or child.partial for child in self.children.values())
+		self.checked = all_checked
+		self.partial = any_checked and not all_checked
+
+	def set_checked(self, checked: bool) -> None:
+		self.checked = checked
+		self.partial = False
+		for child in self.children.values():
+			child.set_checked(checked)
+
+	def update_parent_states(self) -> None:
+		if self.parent is None:
+			return
+		self.parent.update_state_from_children()
+		self.parent.update_parent_states()
+
+	def collect_selected_files(self) -> list[str]:
+		if self.is_file:
+			return [self.full_path] if self.checked else []
+		selected: list[str] = []
+		for child in self.children.values():
+			selected.extend(child.collect_selected_files())
+		return selected
+
+
+def selection_file_path(index_path: Path) -> Path:
+	return index_path.with_name(index_path.stem + ".selection.json")
+
+
+def load_selected_paths(index_path: Path, known_paths: list[str]) -> set[str]:
+	selection_path = selection_file_path(index_path)
+	if not selection_path.exists():
+		return set(known_paths)
+
+	try:
+		with selection_path.open("r", encoding="utf-8") as handle:
+			data = json.load(handle)
+		if not isinstance(data, list):
+			return set(known_paths)
+		selected = {str(path) for path in data if isinstance(path, str)}
+		return {path for path in selected if path in known_paths}
+	except Exception:
+		return set(known_paths)
+
+
+def save_selected_paths(index_path: Path, selected_paths: Iterable[str]) -> None:
+	selection_path = selection_file_path(index_path)
+	try:
+		selection_path.write_text(json.dumps(sorted(selected_paths), indent=2), encoding="utf-8")
+	except OSError:
+		pass
+
+
+def build_selection_tree(all_paths: list[str], selected_paths: set[str]) -> SelectionTreeNode:
+	root = SelectionTreeNode(name="", full_path="", parent=None, children={}, is_file=False)
+	for path_text in sorted(all_paths):
+		parts = path_text.split("/")
+		current = root
+		for index, part in enumerate(parts):
+			is_file = index == len(parts) - 1
+			if part not in current.children:
+				current.children[part] = SelectionTreeNode(
+					name=part,
+					full_path="/".join(parts[: index + 1]),
+					parent=current,
+					children={},
+					is_file=is_file,
+				)
+			current = current.children[part]
+		if current.is_file:
+			current.checked = current.full_path in selected_paths
+
+	# propagate states upward
+	def update_node(node: SelectionTreeNode) -> None:
+		for child in node.children.values():
+			update_node(child)
+		node.update_state_from_children()
+
+	update_node(root)
+	return root
+
+
+def collect_all_selected_paths(root: SelectionTreeNode) -> set[str]:
+	return set(root.collect_selected_files())
+
+
+def format_selection_node_text(node: SelectionTreeNode) -> str:
+	if node.checked and not node.partial:
+		prefix = "[x]"
+	elif node.partial:
+		prefix = "[-]"
+	else:
+		prefix = "[ ]"
+	return f"{prefix} {node.name}" if node.name else prefix
+
+
+def normalize_relpath(path: str) -> str:
+	return path.replace("\\", "/")
+
+
 def load_audio_items(index_path: Path) -> list[AudioItem]:
 	with index_path.open("r", encoding="utf-8") as handle:
 		index_data = json.load(handle)
@@ -291,7 +413,10 @@ class MinecraftRedubApp:
 		self.assets_root = assets_root
 		self.objects_root = objects_root
 
-		self.items = load_audio_items(index_path)
+		self.items_all = load_audio_items(index_path)
+		self.selected_paths = load_selected_paths(index_path, [normalize_relpath(item.relative_path.as_posix()) for item in self.items_all])
+		self.items = [item for item in self.items_all if normalize_relpath(item.relative_path.as_posix()) in self.selected_paths]
+		self.selection_root = build_selection_tree([normalize_relpath(item.relative_path.as_posix()) for item in self.items_all], self.selected_paths)
 		self.current_index = 0
 		self.current_item: AudioItem | None = None
 
@@ -368,6 +493,7 @@ class MinecraftRedubApp:
 		header_actions.pack(side="right", anchor="e")
 		tk.Button(header_actions, text="Export Zip", command=self.export_zip).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Check Completion", command=self.check_completion).pack(side="right", padx=(8, 0))
+		tk.Button(header_actions, text="Select Sounds", command=self.open_selection_popup).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Open Index File", command=self.choose_index_file).pack(side="right", padx=(8, 0))
 		ttk.Label(header, text="redub the 'craft w/ a resource pack", style="Muted.TLabel").pack(side="top", anchor="w", pady=(4, 0), padx=(12, 0))
 
@@ -505,10 +631,100 @@ class MinecraftRedubApp:
 			return
 
 		self.index_path = Path(selected)
-		self.items = load_audio_items(self.index_path)
+		self.items_all = load_audio_items(self.index_path)
+		all_paths = [normalize_relpath(item.relative_path.as_posix()) for item in self.items_all]
+		self.selected_paths = load_selected_paths(self.index_path, all_paths)
+		self.selection_root = build_selection_tree(all_paths, self.selected_paths)
+		self._refresh_selection_items()
 		self.current_index = 0
 		self.status_var.set(f"Loaded index file: {self.index_path}")
 		self._load_next_item()
+
+	def _refresh_selection_items(self) -> None:
+		self.items = [item for item in self.items_all if normalize_relpath(item.relative_path.as_posix()) in self.selected_paths]
+		if not self.items:
+			self.current_index = 0
+			self.current_item = None
+			self.item_var.set("No selected sounds. Open Select Sounds to choose which sounds to record.")
+			self.status_var.set("No selected sounds are configured.")
+			self.record_button.configure(state="disabled")
+		else:
+			self.record_button.configure(state="normal")
+
+	def open_selection_popup(self) -> None:
+		dialog = tk.Toplevel(self.root)
+		dialog.title("Select Sounds")
+		dialog.transient(self.root)
+		dialog.grab_set()
+		dialog.geometry("760x560")
+		frame = ttk.Frame(dialog, padding=12)
+		frame.pack(fill="both", expand=True)
+
+		info_label = ttk.Label(frame, text="Select which sounds should be included in the recording queue.", style="Card.TLabel")
+		info_label.pack(anchor="w", pady=(0, 8))
+
+		tree_frame = ttk.Frame(frame)
+		tree_frame.pack(fill="both", expand=True)
+
+		tree_scroll = ttk.Scrollbar(tree_frame, orient="vertical")
+		tree_scroll.pack(side="right", fill="y")
+		tree = ttk.Treeview(tree_frame, show="tree", yscrollcommand=tree_scroll.set)
+		tree.pack(fill="both", expand=True)
+		tree_scroll.config(command=tree.yview)
+
+		node_id_by_node: dict[str, SelectionTreeNode] = {}
+
+		def refresh_tree() -> None:
+			tree.delete(*tree.get_children())
+			node_id_by_node.clear()
+
+			def insert_node(node: SelectionTreeNode, parent: str | None = "") -> None:
+				item_id = tree.insert(parent, "end", text=format_selection_node_text(node), open=not node.is_file)
+				node_id_by_node[item_id] = node
+				for child in sorted(node.children.values(), key=lambda child: (not child.is_file, child.name.lower())):
+					insert_node(child, item_id)
+
+			for child in sorted(self.selection_root.children.values(), key=lambda child: (not child.is_file, child.name.lower())):
+				insert_node(child, "")
+
+		def toggle_node(item_id: str) -> None:
+			node = node_id_by_node.get(item_id)
+			if node is None:
+				return
+			checked = not node.checked
+			node.set_checked(checked)
+			node.update_parent_states()
+			refresh_tree()
+
+		def on_tree_click(event: tk.Event) -> None:
+			item_id = tree.identify_row(event.y)
+			if not item_id:
+				return
+			toggle_node(item_id)
+
+		tree.bind("<ButtonRelease-1>", on_tree_click)
+
+		button_frame = ttk.Frame(frame)
+		button_frame.pack(fill="x", pady=(12, 0))
+
+		def save_selection() -> None:
+			selected = collect_all_selected_paths(self.selection_root)
+			self.selected_paths = selected
+			save_selected_paths(self.index_path, selected)
+			self._refresh_selection_items()
+			self.current_index = 0
+			self._load_next_item()
+			dialog.destroy()
+
+		def cancel_selection() -> None:
+			dialog.destroy()
+
+		refresh_tree()
+
+		ttk.Button(button_frame, text="Save Selection", command=save_selection, style="Accent.TButton").pack(side="right")
+		tk.Button(button_frame, text="Cancel", command=cancel_selection).pack(side="right", padx=(0, 8))
+
+		dialog.wait_window(dialog)
 
 	def _drain_status_queue(self) -> None:
 		try:

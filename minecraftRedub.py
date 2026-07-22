@@ -7,6 +7,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Iterable
 
 import numpy as np
@@ -95,28 +96,77 @@ def selection_file_path(index_path: Path) -> Path:
 	return index_path.with_name(index_path.stem + ".selection.json")
 
 
-def load_selected_paths(index_path: Path, known_paths: list[str]) -> set[str]:
+def load_selection_state(index_path: Path, known_paths: list[str]) -> tuple[set[str], bool]:
 	selection_path = selection_file_path(index_path)
 	if not selection_path.exists():
-		return set(known_paths)
+		return set(known_paths), False
 
 	try:
 		with selection_path.open("r", encoding="utf-8") as handle:
 			data = json.load(handle)
-		if not isinstance(data, list):
-			return set(known_paths)
-		selected = {str(path) for path in data if isinstance(path, str)}
-		return {path for path in selected if path in known_paths}
+
+		if isinstance(data, dict):
+			selected_raw = data.get("selected_paths")
+			if isinstance(selected_raw, list):
+				selected = {str(path) for path in selected_raw if isinstance(path, str)}
+				selected = {path for path in selected if path in known_paths}
+			else:
+				selected = set(known_paths)
+			hide_repeat = bool(data.get("hide_repeat_sounds", False))
+			return selected, hide_repeat
+
+		if isinstance(data, list):
+			selected = {str(path) for path in data if isinstance(path, str)}
+			return {path for path in selected if path in known_paths}, False
 	except Exception:
-		return set(known_paths)
+		pass
+
+	return set(known_paths), False
 
 
-def save_selected_paths(index_path: Path, selected_paths: Iterable[str]) -> None:
+def save_selection_state(index_path: Path, selected_paths: Iterable[str], hide_repeat_sounds: bool) -> None:
 	selection_path = selection_file_path(index_path)
 	try:
-		selection_path.write_text(json.dumps(sorted(selected_paths), indent=2), encoding="utf-8")
+		selection_path.write_text(
+			json.dumps(
+				{
+					"selected_paths": sorted(selected_paths),
+					"hide_repeat_sounds": bool(hide_repeat_sounds),
+				},
+				indent=2,
+			),
+			encoding="utf-8",
+		)
 	except OSError:
 		pass
+
+
+def _repeat_sound_group_base(path: str) -> str:
+	stem = Path(path).stem
+	match = re.match(r"^(.*?)(\d+)$", stem)
+	return match.group(1) if match else stem
+
+
+def is_repeat_sound_path(path: str) -> bool:
+	stem = Path(path).stem
+	match = re.match(r"^(.*?)(\d+)$", stem)
+	return bool(match and int(match.group(2)) != 1)
+
+
+def collect_repeat_sibling_paths(relative_path: str, known_paths: list[str]) -> list[str]:
+	rel = Path(relative_path)
+	base = _repeat_sound_group_base(relative_path)
+	ext = rel.suffix.lower()
+	parent = rel.parent
+	pattern = re.compile(rf"^{re.escape(base)}(\d+)?$", re.IGNORECASE)
+
+	return sorted(
+		p
+		for p in known_paths
+		if Path(p).parent == parent
+		and Path(p).suffix.lower() == ext
+		and pattern.match(Path(p).stem)
+	)
 
 
 def build_selection_tree(all_paths: list[str], selected_paths: set[str]) -> SelectionTreeNode:
@@ -414,9 +464,12 @@ class MinecraftRedubApp:
 		self.objects_root = objects_root
 
 		self.items_all = load_audio_items(index_path)
-		self.selected_paths = load_selected_paths(index_path, [normalize_relpath(item.relative_path.as_posix()) for item in self.items_all])
+		all_paths = [normalize_relpath(item.relative_path.as_posix()) for item in self.items_all]
+		self.selected_paths, self.hide_repeat_sounds = load_selection_state(index_path, all_paths)
 		self.items = [item for item in self.items_all if normalize_relpath(item.relative_path.as_posix()) in self.selected_paths]
-		self.selection_root = build_selection_tree([normalize_relpath(item.relative_path.as_posix()) for item in self.items_all], self.selected_paths)
+		if self.hide_repeat_sounds:
+			self.items = [item for item in self.items if not is_repeat_sound_path(normalize_relpath(item.relative_path.as_posix()))]
+		self.selection_root = build_selection_tree(all_paths, self.selected_paths)
 		self.current_index = 0
 		self.current_item: AudioItem | None = None
 		self._selection_dialog: tk.Toplevel | None = None
@@ -637,7 +690,7 @@ class MinecraftRedubApp:
 		self.index_path = Path(selected)
 		self.items_all = load_audio_items(self.index_path)
 		all_paths = [normalize_relpath(item.relative_path.as_posix()) for item in self.items_all]
-		self.selected_paths = load_selected_paths(self.index_path, all_paths)
+		self.selected_paths, self.hide_repeat_sounds = load_selection_state(self.index_path, all_paths)
 		self.selection_root = build_selection_tree(all_paths, self.selected_paths)
 		self._refresh_selection_items()
 		self.current_index = 0
@@ -646,6 +699,8 @@ class MinecraftRedubApp:
 
 	def _refresh_selection_items(self) -> None:
 		self.items = [item for item in self.items_all if normalize_relpath(item.relative_path.as_posix()) in self.selected_paths]
+		if self.hide_repeat_sounds:
+			self.items = [item for item in self.items if not is_repeat_sound_path(normalize_relpath(item.relative_path.as_posix()))]
 		if not self.items:
 			self.current_index = 0
 			self.current_item = None
@@ -667,6 +722,9 @@ class MinecraftRedubApp:
 		info_label = ttk.Label(frame, text="Select which sounds should be included in the recording queue.", style="Card.TLabel")
 		info_label.pack(anchor="w", pady=(0, 8))
 
+		hide_repeat_var = tk.BooleanVar(value=self.hide_repeat_sounds)
+		ttk.Checkbutton(frame, text="Hide Repeat Sounds", variable=hide_repeat_var, command=lambda: refresh_tree()).pack(anchor="w", pady=(0, 8))
+
 		tree_frame = ttk.Frame(frame)
 		tree_frame.pack(fill="both", expand=True)
 
@@ -678,13 +736,19 @@ class MinecraftRedubApp:
 
 		node_id_by_node: dict[str, SelectionTreeNode] = {}
 
+		selection_root: SelectionTreeNode | None = None
+
 		def refresh_tree() -> None:
+			nonlocal selection_root
 			open_states: dict[str, bool] = {}
 			for item_id, node in node_id_by_node.items():
 				open_states[node.full_path] = tree.item(item_id, "open")
 
 			tree.delete(*tree.get_children())
 			node_id_by_node.clear()
+
+			visible_paths = self._filter_visible_paths([normalize_relpath(item.relative_path.as_posix()) for item in self.items_all]) if hide_repeat_var.get() else [normalize_relpath(item.relative_path.as_posix()) for item in self.items_all]
+			selection_root = build_selection_tree(visible_paths, self.selected_paths)
 
 			def insert_node(node: SelectionTreeNode, parent: str | None = "") -> None:
 				item_id = tree.insert(
@@ -697,8 +761,9 @@ class MinecraftRedubApp:
 				for child in sorted(node.children.values(), key=lambda child: (not child.is_file, child.name.lower())):
 					insert_node(child, item_id)
 
-			for child in sorted(self.selection_root.children.values(), key=lambda child: (not child.is_file, child.name.lower())):
-				insert_node(child, "")
+			if selection_root is not None:
+				for child in sorted(selection_root.children.values(), key=lambda child: (not child.is_file, child.name.lower())):
+					insert_node(child, "")
 
 		def toggle_node(item_id: str) -> None:
 			node = node_id_by_node.get(item_id)
@@ -739,9 +804,12 @@ class MinecraftRedubApp:
 		button_frame.pack(fill="x", pady=(12, 0))
 
 		def save_selection() -> None:
-			selected = collect_all_selected_paths(self.selection_root)
+			if selection_root is None:
+				return
+			selected = collect_all_selected_paths(selection_root)
 			self.selected_paths = selected
-			save_selected_paths(self.index_path, selected)
+			self.hide_repeat_sounds = hide_repeat_var.get()
+			save_selection_state(self.index_path, selected, self.hide_repeat_sounds)
 			self._refresh_selection_items()
 			self.current_index = 0
 			self._load_next_item()
@@ -797,18 +865,25 @@ class MinecraftRedubApp:
 		listbox.pack(fill="both", expand=True)
 		scrollbar.config(command=listbox.yview)
 
-		for item in self.items:
+		visible_items = self._filter_visible_items(self.items)
+		visible_indices = [self.items.index(item) for item in visible_items]
+
+		for item in visible_items:
 			listbox.insert("end", item.relative_path.as_posix())
 
-		if self.current_index < len(self.items):
-			listbox.selection_set(self.current_index)
-			listbox.see(self.current_index)
+		if self.current_item in visible_items:
+			selected_index = visible_items.index(self.current_item)
+			listbox.selection_set(selected_index)
+			listbox.see(selected_index)
 
 		def go_to_selected(_event: tk.Event | None = None) -> None:
 			selection = listbox.curselection()
 			if not selection:
 				return
-			index = selection[0]
+			visible_index = selection[0]
+			if visible_index >= len(visible_indices):
+				return
+			index = visible_indices[visible_index]
 			self.current_index = index
 			self.current_item = self.items[self.current_index]
 			self._load_current_item()
@@ -855,6 +930,25 @@ class MinecraftRedubApp:
 		created = sum(1 for item in self.items if item.target_path(self.assets_root).exists())
 		remaining = max(0, total - created)
 		self.progress_var.set(f"Progress: {created}/{total} created, {remaining} remaining")
+
+	def _filter_visible_paths(self, paths: Iterable[str]) -> list[str]:
+		if not self.hide_repeat_sounds:
+			return list(paths)
+		return [path for path in paths if not is_repeat_sound_path(path)]
+
+	def _filter_visible_items(self, items: list[AudioItem]) -> list[AudioItem]:
+		if not self.hide_repeat_sounds:
+			return list(items)
+		return [item for item in items if not is_repeat_sound_path(normalize_relpath(item.relative_path.as_posix()))]
+
+	def _collect_save_targets(self, item: AudioItem) -> list[Path]:
+		relative = normalize_relpath(item.relative_path.as_posix())
+		all_paths = [normalize_relpath(it.relative_path.as_posix()) for it in self.items_all]
+		if self.hide_repeat_sounds:
+			group_paths = collect_repeat_sibling_paths(relative, all_paths)
+		else:
+			group_paths = [relative]
+		return [self.assets_root / Path(path) for path in group_paths]
 
 	def _find_first_unrecorded_in_range(self, start: int, end: int) -> int | None:
 		#this that binary shiz
@@ -1414,11 +1508,10 @@ class MinecraftRedubApp:
 			# match audio length
 			audio_to_save = self.finalize_audio_for_save(audio_to_save)
 
-			target_path = self.current_item.target_path(self.assets_root)
-			ensure_parent_dir(target_path)
+			target_paths = self._collect_save_targets(self.current_item)
 
 			try:
-    			# normalize type / remove NaNs/infs to avoid libsndfile crashes
+				# normalize type / remove NaNs/infs to avoid libsndfile crashes
 				# this part sucked cause randomly some files would not save, turned out because what we were using to save into .ogg didn't handle super big khz
 				# so we resample to 48k if the recorded rate is higher than that, which isn't the max but is lowkey good enough
 				audio_to_save = np.asarray(audio_to_save, dtype=np.float32)
@@ -1429,7 +1522,10 @@ class MinecraftRedubApp:
 					audio_for_disk = resample_audio(audio_to_save, disk_rate, 48000)
 					disk_rate = 48000
 				audio_for_disk = np.ascontiguousarray(audio_for_disk, dtype=np.float32)
-				sf.write(target_path, audio_for_disk, disk_rate, format="OGG", subtype="VORBIS")
+
+				for target_path in target_paths:
+					ensure_parent_dir(target_path)
+					sf.write(target_path, audio_for_disk, disk_rate, format="OGG", subtype="VORBIS")
 			except Exception as exc:
 				messagebox.showerror(APP_TITLE, f"Failed to save {target_path.as_posix()}\n\n{exc}")
 				return

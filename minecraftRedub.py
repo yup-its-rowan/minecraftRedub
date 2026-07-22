@@ -528,8 +528,9 @@ class MinecraftRedubApp:
 
 	def _set_progress(self) -> None:
 		total = len(self.items)
-		remaining = max(0, total - self.current_index)
-		self.progress_var.set(f"Progress: {self.current_index}/{total} complete, {remaining} remaining")
+		created = sum(1 for item in self.items if item.target_path(self.assets_root).exists())
+		remaining = max(0, total - created)
+		self.progress_var.set(f"Progress: {created}/{total} created, {remaining} remaining")
 
 	def _find_first_unrecorded_in_range(self, start: int, end: int) -> int | None:
 		#this that binary shiz

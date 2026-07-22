@@ -420,6 +420,7 @@ class MinecraftRedubApp:
 		self.current_index = 0
 		self.current_item: AudioItem | None = None
 		self._selection_dialog: tk.Toplevel | None = None
+		self._skip_dialog: tk.Toplevel | None = None
 
 		self.original_audio = np.zeros(0, dtype=np.float32)
 		self.original_rate = DEFAULT_SAMPLE_RATE
@@ -495,6 +496,7 @@ class MinecraftRedubApp:
 		header_actions.pack(side="right", anchor="e")
 		tk.Button(header_actions, text="Export Zip", command=self.export_zip).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Check Completion", command=self.check_completion).pack(side="right", padx=(8, 0))
+		tk.Button(header_actions, text="Skip To", command=self.open_skip_popup).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Select Sounds", command=self.open_selection_popup).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Open Index File", command=self.choose_index_file).pack(side="right", padx=(8, 0))
 		ttk.Label(header, text="redub the 'craft w/ a resource pack", style="Muted.TLabel").pack(side="top", anchor="w", pady=(4, 0), padx=(12, 0))
@@ -762,6 +764,75 @@ class MinecraftRedubApp:
 		tk.Button(button_frame, text="Cancel", command=cancel_selection).pack(side="right", padx=(0, 8))
 
 		dialog.wait_window(dialog)
+
+	def open_skip_popup(self) -> None:
+		if self._skip_dialog is not None and self._skip_dialog.winfo_exists():
+			self._skip_dialog.lift()
+			return
+
+		dialog = tk.Toplevel(self.root)
+		self._skip_dialog = dialog
+		dialog.title("Skip to Sound")
+		dialog.transient(self.root)
+		dialog.geometry("520x580")
+		frame = ttk.Frame(dialog, padding=12)
+		frame.pack(fill="both", expand=True)
+
+		info_label = ttk.Label(frame, text="Choose a sound from the current saved selection.", style="Card.TLabel")
+		info_label.pack(anchor="w", pady=(0, 8))
+
+		list_frame = ttk.Frame(frame)
+		list_frame.pack(fill="both", expand=True)
+
+		scrollbar = ttk.Scrollbar(list_frame, orient="vertical")
+		scrollbar.pack(side="right", fill="y")
+
+		listbox = tk.Listbox(
+			list_frame,
+			yscrollcommand=scrollbar.set,
+			activestyle="none",
+			exportselection=False,
+			selectmode="browse",
+		)
+		listbox.pack(fill="both", expand=True)
+		scrollbar.config(command=listbox.yview)
+
+		for item in self.items:
+			listbox.insert("end", item.relative_path.as_posix())
+
+		if self.current_index < len(self.items):
+			listbox.selection_set(self.current_index)
+			listbox.see(self.current_index)
+
+		def go_to_selected(_event: tk.Event | None = None) -> None:
+			selection = listbox.curselection()
+			if not selection:
+				return
+			index = selection[0]
+			self.current_index = index
+			self.current_item = self.items[self.current_index]
+			self._load_current_item()
+			self._skip_dialog = None
+			dialog.destroy()
+
+		button_frame = ttk.Frame(frame)
+		button_frame.pack(fill="x", pady=(12, 0))
+
+		go_button = ttk.Button(button_frame, text="Go", command=go_to_selected, style="Accent.TButton")
+		go_button.pack(side="right")
+		if not self.items:
+			go_button.configure(state="disabled")
+
+		cancel_button = tk.Button(button_frame, text="Cancel", command=lambda: [setattr(self, "_skip_dialog", None), dialog.destroy()])
+		cancel_button.pack(side="right", padx=(0, 8))
+
+		listbox.bind("<Double-Button-1>", go_to_selected)
+
+		def on_popup_close() -> None:
+			self._skip_dialog = None
+			dialog.destroy()
+
+		dialog.protocol("WM_DELETE_WINDOW", on_popup_close)
 
 	def _drain_status_queue(self) -> None:
 		try:
@@ -1404,11 +1475,12 @@ class MinecraftRedubApp:
 			self.record_button.configure(state="disabled")
 
 	def _on_root_close(self) -> None:
-		if self._selection_dialog is not None:
-			try:
-				self._selection_dialog.destroy()
-			except Exception:
-				pass
+		for dialog in (self._selection_dialog, self._skip_dialog):
+			if dialog is not None:
+				try:
+					dialog.destroy()
+				except Exception:
+					pass
 		self.root.destroy()
 
 

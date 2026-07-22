@@ -675,11 +675,20 @@ class MinecraftRedubApp:
 		node_id_by_node: dict[str, SelectionTreeNode] = {}
 
 		def refresh_tree() -> None:
+			open_states: dict[str, bool] = {}
+			for item_id, node in node_id_by_node.items():
+				open_states[node.full_path] = tree.item(item_id, "open")
+
 			tree.delete(*tree.get_children())
 			node_id_by_node.clear()
 
 			def insert_node(node: SelectionTreeNode, parent: str | None = "") -> None:
-				item_id = tree.insert(parent, "end", text=format_selection_node_text(node), open=not node.is_file)
+				item_id = tree.insert(
+					parent,
+					"end",
+					text=format_selection_node_text(node),
+					open=open_states.get(node.full_path, not node.is_file),
+				)
 				node_id_by_node[item_id] = node
 				for child in sorted(node.children.values(), key=lambda child: (not child.is_file, child.name.lower())):
 					insert_node(child, item_id)
@@ -696,13 +705,31 @@ class MinecraftRedubApp:
 			node.update_parent_states()
 			refresh_tree()
 
-		def on_tree_click(event: tk.Event) -> None:
+		indicator_press = False
+
+		def on_tree_press(event: tk.Event) -> None:
+			nonlocal indicator_press
+			element = tree.identify_element(event.x, event.y)
+			indicator_press = element == "Treeitem.indicator"
+
+		def on_tree_release(event: tk.Event) -> None:
+			nonlocal indicator_press
 			item_id = tree.identify_row(event.y)
 			if not item_id:
+				indicator_press = False
+				return
+			if indicator_press:
+				indicator_press = False
+				return
+			element = tree.identify_element(event.x, event.y)
+			if element == "Treeitem.indicator":
+				indicator_press = False
 				return
 			toggle_node(item_id)
+			indicator_press = False
 
-		tree.bind("<ButtonRelease-1>", on_tree_click)
+		tree.bind("<ButtonPress-1>", on_tree_press)
+		tree.bind("<ButtonRelease-1>", on_tree_release)
 
 		button_frame = ttk.Frame(frame)
 		button_frame.pack(fill="x", pady=(12, 0))

@@ -419,6 +419,7 @@ class MinecraftRedubApp:
 		self.selection_root = build_selection_tree([normalize_relpath(item.relative_path.as_posix()) for item in self.items_all], self.selected_paths)
 		self.current_index = 0
 		self.current_item: AudioItem | None = None
+		self._selection_dialog: tk.Toplevel | None = None
 
 		self.original_audio = np.zeros(0, dtype=np.float32)
 		self.original_rate = DEFAULT_SAMPLE_RATE
@@ -457,6 +458,7 @@ class MinecraftRedubApp:
 		self.aligned_duration_var = tk.StringVar(value="Final: --")
 
 		self._build_ui()
+		self.root.protocol("WM_DELETE_WINDOW", self._on_root_close)
 		self._update_trim_slider_limits()
 		self.root.after(100, self._drain_status_queue)
 		self.root.after(120, self._refresh_canvases)
@@ -653,9 +655,9 @@ class MinecraftRedubApp:
 
 	def open_selection_popup(self) -> None:
 		dialog = tk.Toplevel(self.root)
+		self._selection_dialog = dialog
 		dialog.title("Select Sounds")
 		dialog.transient(self.root)
-		dialog.grab_set()
 		dialog.geometry("760x560")
 		frame = ttk.Frame(dialog, padding=12)
 		frame.pack(fill="both", expand=True)
@@ -741,10 +743,18 @@ class MinecraftRedubApp:
 			self._refresh_selection_items()
 			self.current_index = 0
 			self._load_next_item()
+			self._selection_dialog = None
 			dialog.destroy()
 
 		def cancel_selection() -> None:
+			self._selection_dialog = None
 			dialog.destroy()
+
+		def on_popup_close() -> None:
+			self._selection_dialog = None
+			dialog.destroy()
+
+		dialog.protocol("WM_DELETE_WINDOW", on_popup_close)
 
 		refresh_tree()
 
@@ -1392,6 +1402,14 @@ class MinecraftRedubApp:
 			self.status_var.set(f"Could not load next item: {exc}")
 			self.save_button.configure(state="disabled")
 			self.record_button.configure(state="disabled")
+
+	def _on_root_close(self) -> None:
+		if self._selection_dialog is not None:
+			try:
+				self._selection_dialog.destroy()
+			except Exception:
+				pass
+		self.root.destroy()
 
 
 def build_default_paths() -> tuple[Path, Path, Path]:

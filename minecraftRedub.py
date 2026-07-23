@@ -438,20 +438,26 @@ class Tooltip:
 		widget.bind("<Leave>", self._hide_tip)
 		widget.bind("<Motion>", self._move_tip)
 
-	def _schedule_show(self, _event: tk.Event) -> None:
+	def _schedule_show(self, event: tk.Event) -> None:
+		self._mouse_x = event.x_root
+		self._mouse_y = event.y_root
 		self._after_id = self.widget.after(300, self._show_tip)
 
 	def _move_tip(self, event: tk.Event) -> None:
+		self._mouse_x = event.x_root
+		self._mouse_y = event.y_root
 		if self.tipwindow:
-			x = event.x_root + 16
-			y = event.y_root + 16
+			x = self._mouse_x + 16
+			y = self._mouse_y + 16
 			self.tipwindow.geometry(f"+{x}+{y}")
 
 	def _show_tip(self) -> None:
 		if self.tipwindow or not self.text:
 			return
-		x = self.widget.winfo_rootx() + 16
-		y = self.widget.winfo_rooty() + self.widget.winfo_height() + 8
+		x = getattr(self, "_mouse_x", self.widget.winfo_rootx() + 16)
+		y = getattr(self, "_mouse_y", self.widget.winfo_rooty() + self.widget.winfo_height() + 8)
+		x += 16
+		y += 16
 		self.tipwindow = tk.Toplevel(self.widget)
 		self.tipwindow.wm_overrideredirect(True)
 		self.tipwindow.wm_geometry(f"+{x}+{y}")
@@ -577,7 +583,6 @@ class MinecraftRedubApp:
 		tk.Button(header_actions, text="Check Completion", command=self.check_completion).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Bundles", command=self.open_bundles_popup).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Skip To", command=self.open_skip_popup).pack(side="right", padx=(8, 0))
-		tk.Button(header_actions, text="Select Sounds", command=self.open_selection_popup).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Open Index File", command=self.choose_index_file).pack(side="right", padx=(8, 0))
 		ttk.Label(header, text="redub the 'craft w/ a resource pack", style="Muted.TLabel").pack(side="top", anchor="w", pady=(4, 0), padx=(12, 0))
 
@@ -876,7 +881,7 @@ class MinecraftRedubApp:
 		frame = ttk.Frame(dialog, padding=12)
 		frame.pack(fill="both", expand=True)
 
-		info_label = ttk.Label(frame, text="Choose a developer bundle to load a curated sound selection.", style="Card.TLabel")
+		info_label = ttk.Label(frame, text="Choose a developer bundle to load a curated sound selection, or open a custom bundle to manually choose sounds.", style="Card.TLabel")
 		info_label.pack(anchor="w", pady=(0, 8))
 
 		bundle_files = bundle_file_paths(Path(__file__).resolve().parent)
@@ -884,10 +889,13 @@ class MinecraftRedubApp:
 			empty_label = ttk.Label(frame, text="No bundles available in the project root.", style="Card.TLabel")
 			empty_label.pack(anchor="w", pady=(8, 0))
 		else:
-			canvas = tk.Canvas(frame, background="#111827", highlightthickness=0)
-			scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+			content_frame = ttk.Frame(frame)
+			content_frame.pack(fill="both", expand=True)
+
+			canvas = tk.Canvas(content_frame, background="#111827", highlightthickness=0)
+			scrollbar = ttk.Scrollbar(content_frame, orient="vertical", command=canvas.yview)
 			canvas.pack(side="left", fill="both", expand=True)
-			canvas.configure(yscrollcommand=scrollbar.set)
+			scrollbar.pack(side="right", fill="y")
 
 			inner_frame = ttk.Frame(canvas)
 			canvas.create_window((0, 0), window=inner_frame, anchor="nw")
@@ -945,30 +953,35 @@ class MinecraftRedubApp:
 					self._bundles_dialog = None
 					dialog.destroy()
 
-				def on_tile_click(event: tk.Event, action=apply_bundle) -> None:
-					action()
+					def on_tile_click(event: tk.Event, target_tile=tile, action=apply_bundle) -> None:
+						action()
 
-				def on_tile_enter(event: tk.Event) -> None:
-					tile.configure(style="BundleTileHover.TFrame")
+					def on_tile_enter(event: tk.Event, target_tile=tile) -> None:
+						target_tile.configure(style="BundleTileHover.TFrame")
 
-				def on_tile_leave(event: tk.Event) -> None:
-					tile.configure(style="BundleTile.TFrame")
+					def on_tile_leave(event: tk.Event, target_tile=tile) -> None:
+						target_tile.configure(style="BundleTile.TFrame")
 
-				tile.bind("<Button-1>", on_tile_click)
-				tile.bind("<Enter>", on_tile_enter)
-				tile.bind("<Leave>", on_tile_leave)
-				title_label.bind("<Button-1>", on_tile_click)
+					tile.bind("<Button-1>", on_tile_click)
+					tile.bind("<Enter>", on_tile_enter)
+					tile.bind("<Leave>", on_tile_leave)
+					title_label.bind("<Button-1>", on_tile_click)
 
 			inner_frame.columnconfigure(0, weight=1)
 			inner_frame.columnconfigure(1, weight=1)
 			inner_frame.columnconfigure(2, weight=1)
 
 		button_frame = ttk.Frame(frame)
-		button_frame.pack(fill="x", pady=(12, 0))
+		button_frame.pack(side="bottom", fill="x", pady=(12, 0))
+
+		def open_custom_bundle() -> None:
+			self.open_selection_popup()
 
 		def cancel() -> None:
 			self._bundles_dialog = None
 			dialog.destroy()
+
+		ttk.Button(button_frame, text="Custom Bundle", command=open_custom_bundle, style="Accent.TButton").pack(side="right", padx=(0, 8), pady=(4, 0))
 
 		dialog.protocol("WM_DELETE_WINDOW", cancel)
 
@@ -1039,7 +1052,7 @@ class MinecraftRedubApp:
 		if not self.items:
 			go_button.configure(state="disabled")
 
-		cancel_button = tk.Button(button_frame, text="Cancel", command=lambda: [setattr(self, "_skip_dialog", None), dialog.destroy()])
+		cancel_button = ttk.Button(button_frame, text="Cancel", command=lambda: [setattr(self, "_skip_dialog", None), dialog.destroy()])
 		cancel_button.pack(side="right", padx=(0, 8))
 
 		listbox.bind("<Double-Button-1>", go_to_selected)

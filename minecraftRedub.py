@@ -577,7 +577,6 @@ class MinecraftRedubApp:
 		tk.Button(header_actions, text="Check Completion", command=self.check_completion).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Bundles", command=self.open_bundles_popup).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Skip To", command=self.open_skip_popup).pack(side="right", padx=(8, 0))
-		tk.Button(header_actions, text="Select Sounds", command=self.open_selection_popup).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Open Index File", command=self.choose_index_file).pack(side="right", padx=(8, 0))
 		ttk.Label(header, text="redub the 'craft w/ a resource pack", style="Muted.TLabel").pack(side="top", anchor="w", pady=(4, 0), padx=(12, 0))
 
@@ -731,7 +730,7 @@ class MinecraftRedubApp:
 		if not self.items:
 			self.current_index = 0
 			self.current_item = None
-			self.item_var.set("No selected sounds. Open Select Sounds to choose which sounds to record.")
+			self.item_var.set("No selected sounds. Open Bundles and use Custom Bundle to choose which sounds to record.")
 			self.status_var.set("No selected sounds are configured.")
 			self.record_button.configure(state="disabled")
 		else:
@@ -884,8 +883,11 @@ class MinecraftRedubApp:
 			empty_label = ttk.Label(frame, text="No bundles available in the project root.", style="Card.TLabel")
 			empty_label.pack(anchor="w", pady=(8, 0))
 		else:
-			canvas = tk.Canvas(frame, background="#111827", highlightthickness=0)
-			scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+			bundle_frame = ttk.Frame(frame)
+			bundle_frame.pack(fill="both", expand=True)
+
+			canvas = tk.Canvas(bundle_frame, background="#111827", highlightthickness=0)
+			scrollbar = ttk.Scrollbar(bundle_frame, orient="vertical", command=canvas.yview)
 			canvas.pack(side="left", fill="both", expand=True)
 			canvas.configure(yscrollcommand=scrollbar.set)
 
@@ -963,8 +965,10 @@ class MinecraftRedubApp:
 			inner_frame.columnconfigure(1, weight=1)
 			inner_frame.columnconfigure(2, weight=1)
 
-		button_frame = ttk.Frame(frame)
-		button_frame.pack(fill="x", pady=(12, 0))
+		custom_section = ttk.Frame(frame, style="Card.TFrame", padding=12)
+		custom_section.pack(fill="x", pady=(12, 0))
+		custom_section.columnconfigure(0, weight=1)
+		ttk.Button(custom_section, text="Custom Bundle", command=self.open_selection_popup, style="Accent.TButton").grid(row=0, column=0, sticky="e")
 
 		def cancel() -> None:
 			self._bundles_dialog = None

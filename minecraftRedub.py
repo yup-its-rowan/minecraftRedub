@@ -723,7 +723,8 @@ class MinecraftRedubApp:
 		info_label.pack(anchor="w", pady=(0, 8))
 
 		hide_repeat_var = tk.BooleanVar(value=self.hide_repeat_sounds)
-		ttk.Checkbutton(frame, text="Hide Repeat Sounds", variable=hide_repeat_var, command=lambda: refresh_tree()).pack(anchor="w", pady=(0, 8))
+		ttk.Checkbutton(frame, text="Hide Repeat Sounds", variable=hide_repeat_var).pack(anchor="w", pady=(0, 8))
+		hide_repeat_var.trace_add("write", lambda *_: refresh_tree(rebuild=True))
 
 		tree_frame = ttk.Frame(frame)
 		tree_frame.pack(fill="both", expand=True)
@@ -738,7 +739,7 @@ class MinecraftRedubApp:
 
 		selection_root: SelectionTreeNode | None = None
 
-		def refresh_tree() -> None:
+		def refresh_tree(rebuild: bool = False) -> None:
 			nonlocal selection_root
 			open_states: dict[str, bool] = {}
 			for item_id, node in node_id_by_node.items():
@@ -747,8 +748,10 @@ class MinecraftRedubApp:
 			tree.delete(*tree.get_children())
 			node_id_by_node.clear()
 
-			visible_paths = self._filter_visible_paths([normalize_relpath(item.relative_path.as_posix()) for item in self.items_all]) if hide_repeat_var.get() else [normalize_relpath(item.relative_path.as_posix()) for item in self.items_all]
-			selection_root = build_selection_tree(visible_paths, self.selected_paths)
+			if selection_root is None or rebuild:
+				all_paths = [normalize_relpath(item.relative_path.as_posix()) for item in self.items_all]
+				visible_paths = [path for path in all_paths if not is_repeat_sound_path(path)] if hide_repeat_var.get() else all_paths
+				selection_root = build_selection_tree(visible_paths, self.selected_paths)
 
 			def insert_node(node: SelectionTreeNode, parent: str | None = "") -> None:
 				item_id = tree.insert(

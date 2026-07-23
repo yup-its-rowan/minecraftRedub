@@ -62,3 +62,9 @@ Instead of resting, we took steps towards bundle functionality. After fixing som
 In terms of other stuff to add, I want to prepackage some "bundles" with the program with escalating difficulties of redubbing. And also I would really like to auto create duplicate sounds for when you dub over a sound that has multiple takes. For example there are many different placing sounds so that placing many of the same block doesn't sound repetitive. However dubbing each block four times is beyond tedious, so there's probably something I can do there, maybe a toggle or something I am not yet sure.
 
 Yippee we are almost there.
+
+## Day 8
+
+I added the toggle for hiding repeat sounds, and also basic bundle functionality. I'm having some trouble with UI for the bundle panes as well as displaying the description of the bundles themselves. I may also need to change the name of the button that launches the Bundles Pane so that people click on it first.
+
+After this I touch up the UI with a more personal style and bam that's the program. I know it shows that I've only worked on this 8 days but the 8 days in question have been like 5-7 hour days sporadically through the month in between other coding projects [like fixing up my website at https://rohanakki.com ;D]. It has been annoying to fumble around with, considering how abstract the code is (for both future-proofing and use by others), but I really want to finish this so I can move on to some other things I am excited about.

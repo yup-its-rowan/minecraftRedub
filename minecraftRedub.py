@@ -141,6 +141,28 @@ def save_selection_state(index_path: Path, selected_paths: Iterable[str], hide_r
 		pass
 
 
+def bundle_file_paths(base_path: Path) -> list[Path]:
+	return sorted(base_path.glob("bundle.*.selection.json"))
+
+
+def bundle_name_from_file(bundle_path: Path) -> str:
+	name = bundle_path.stem
+	if name.startswith("bundle."):
+		name = name[len("bundle."):]
+	return name.replace("_", " ").strip().title()
+
+
+def load_bundle_definition(bundle_path: Path) -> dict[str, object]:
+	try:
+		with bundle_path.open("r", encoding="utf-8") as handle:
+			data = json.load(handle)
+		if not isinstance(data, dict):
+			return {}
+		return data
+	except Exception:
+		return {}
+
+
 def _repeat_sound_group_base(path: str) -> str:
 	stem = Path(path).stem
 	match = re.match(r"^(.*?)(\d+)$", stem)
@@ -474,6 +496,7 @@ class MinecraftRedubApp:
 		self.current_item: AudioItem | None = None
 		self._selection_dialog: tk.Toplevel | None = None
 		self._skip_dialog: tk.Toplevel | None = None
+		self._bundles_dialog: tk.Toplevel | None = None
 
 		self.original_audio = np.zeros(0, dtype=np.float32)
 		self.original_rate = DEFAULT_SAMPLE_RATE
@@ -528,7 +551,10 @@ class MinecraftRedubApp:
 		style.theme_use("clam")
 		style.configure("TFrame", background="#0f172a")
 		style.configure("Card.TFrame", background="#111827")
+		style.configure("BundleTile.TFrame", background="#111827", relief="ridge", borderwidth=1)
+		style.configure("BundleTileHover.TFrame", background="#1f2937", relief="ridge", borderwidth=1)
 		style.configure("TLabel", background="#0f172a", foreground="#e5e7eb", font=("Segoe UI", 10))
+		style.configure("BundleTitle.TLabel", background="#111827", foreground="#e5e7eb", font=("Segoe UI", 11, "bold"))
 		style.configure("Muted.TLabel", background="#0f172a", foreground="#94a3b8", font=("Segoe UI", 9))
 		style.configure("Card.TLabel", background="#111827", foreground="#e5e7eb", font=("Segoe UI", 10))
 		style.configure("Warning.TLabel", background="#111827", foreground="#f87171", font=("Segoe UI", 9, "bold"))
@@ -549,6 +575,7 @@ class MinecraftRedubApp:
 		header_actions.pack(side="right", anchor="e")
 		tk.Button(header_actions, text="Export Zip", command=self.export_zip).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Check Completion", command=self.check_completion).pack(side="right", padx=(8, 0))
+		tk.Button(header_actions, text="Bundles", command=self.open_bundles_popup).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Skip To", command=self.open_skip_popup).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Select Sounds", command=self.open_selection_popup).pack(side="right", padx=(8, 0))
 		tk.Button(header_actions, text="Open Index File", command=self.choose_index_file).pack(side="right", padx=(8, 0))
@@ -833,6 +860,117 @@ class MinecraftRedubApp:
 
 		ttk.Button(button_frame, text="Save Selection", command=save_selection, style="Accent.TButton").pack(side="right")
 		tk.Button(button_frame, text="Cancel", command=cancel_selection).pack(side="right", padx=(0, 8))
+
+		dialog.wait_window(dialog)
+
+	def open_bundles_popup(self) -> None:
+		if self._bundles_dialog is not None and self._bundles_dialog.winfo_exists():
+			self._bundles_dialog.lift()
+			return
+
+		dialog = tk.Toplevel(self.root)
+		self._bundles_dialog = dialog
+		dialog.title("Bundles")
+		dialog.transient(self.root)
+		dialog.geometry("760x560")
+		frame = ttk.Frame(dialog, padding=12)
+		frame.pack(fill="both", expand=True)
+
+		info_label = ttk.Label(frame, text="Choose a developer bundle to load a curated sound selection.", style="Card.TLabel")
+		info_label.pack(anchor="w", pady=(0, 8))
+
+		bundle_files = bundle_file_paths(Path(__file__).resolve().parent)
+		if not bundle_files:
+			empty_label = ttk.Label(frame, text="No bundles available in the project root.", style="Card.TLabel")
+			empty_label.pack(anchor="w", pady=(8, 0))
+		else:
+			canvas = tk.Canvas(frame, background="#111827", highlightthickness=0)
+			scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+			canvas.pack(side="left", fill="both", expand=True)
+			canvas.configure(yscrollcommand=scrollbar.set)
+
+			inner_frame = ttk.Frame(canvas)
+			canvas.create_window((0, 0), window=inner_frame, anchor="nw")
+
+			def update_scrollbar_visibility() -> None:
+				canvas.update_idletasks()
+				bbox = canvas.bbox("all")
+				if bbox is None:
+					return
+				content_height = bbox[3] - bbox[1]
+				canvas_height = max(canvas.winfo_height(), 1)
+				if content_height > canvas_height:
+					if not scrollbar.winfo_ismapped():
+						scrollbar.pack(side="right", fill="y")
+				else:
+					if scrollbar.winfo_ismapped():
+						scrollbar.pack_forget()
+
+			def on_configure(_event: tk.Event) -> None:
+				canvas.configure(scrollregion=canvas.bbox("all"))
+				update_scrollbar_visibility()
+
+			inner_frame.bind("<Configure>", on_configure)
+			canvas.bind("<Configure>", lambda _event: update_scrollbar_visibility())
+			dialog.after(50, update_scrollbar_visibility)
+
+			for bundle_index, bundle_path in enumerate(bundle_files):
+				bundle_data = load_bundle_definition(bundle_path)
+				bundle_title = bundle_data.get("bundle_name") or bundle_name_from_file(bundle_path)
+				bundle_description = str(bundle_data.get("description", "No description provided."))
+
+				tile = ttk.Frame(inner_frame, style="BundleTile.TFrame", width=220, height=160)
+				tile.grid(row=bundle_index // 3, column=bundle_index % 3, padx=10, pady=10, sticky="n")
+				tile.grid_propagate(False)
+
+				title_label = ttk.Label(tile, text=bundle_title, style="BundleTitle.TLabel", wraplength=200, justify="center")
+				title_label.place(relx=0.5, rely=0.45, anchor="center")
+				Tooltip(tile, bundle_description)
+
+				def apply_bundle(bundle_data=bundle_data, bundle_title=bundle_title) -> None:
+					selected_raw = bundle_data.get("selected_paths")
+					if not isinstance(selected_raw, list):
+						messagebox.showerror(APP_TITLE, f"Bundle {bundle_title} is invalid or missing selected_paths.")
+						return
+					all_paths = [normalize_relpath(item.relative_path.as_posix()) for item in self.items_all]
+					selected = [path for path in selected_raw if isinstance(path, str) and path in all_paths]
+					hide_repeat = bool(bundle_data.get("hide_repeat_sounds", False))
+					save_selection_state(self.index_path, selected, hide_repeat)
+					self.selected_paths = set(selected)
+					self.hide_repeat_sounds = hide_repeat
+					self.selection_root = build_selection_tree(all_paths, self.selected_paths)
+					self._refresh_selection_items()
+					self.current_index = 0
+					self._load_next_item()
+					self._bundles_dialog = None
+					dialog.destroy()
+
+				def on_tile_click(event: tk.Event, action=apply_bundle) -> None:
+					action()
+
+				def on_tile_enter(event: tk.Event) -> None:
+					tile.configure(style="BundleTileHover.TFrame")
+
+				def on_tile_leave(event: tk.Event) -> None:
+					tile.configure(style="BundleTile.TFrame")
+
+				tile.bind("<Button-1>", on_tile_click)
+				tile.bind("<Enter>", on_tile_enter)
+				tile.bind("<Leave>", on_tile_leave)
+				title_label.bind("<Button-1>", on_tile_click)
+
+			inner_frame.columnconfigure(0, weight=1)
+			inner_frame.columnconfigure(1, weight=1)
+			inner_frame.columnconfigure(2, weight=1)
+
+		button_frame = ttk.Frame(frame)
+		button_frame.pack(fill="x", pady=(12, 0))
+
+		def cancel() -> None:
+			self._bundles_dialog = None
+			dialog.destroy()
+
+		dialog.protocol("WM_DELETE_WINDOW", cancel)
 
 		dialog.wait_window(dialog)
 
